@@ -23,3 +23,12 @@ export function formatFeeTier(feeTier: number): string {
 export function formatDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleDateString('pt-BR');
 }
+
+export function truncateAddress(address: string): string {
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+export function etherscanTokenUrl(address: string): string {
+  return `https://etherscan.io/token/${address}`;
+}

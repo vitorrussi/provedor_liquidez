@@ -5,7 +5,7 @@ from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Toke
 
 _SEARCH_QUERY = """
 query SearchPools($search: String!, $first: Int!) {
-  asToken0: pools(
+  bySymbol0: pools(
     where: { token0_: { symbol_contains_nocase: $search } }
     orderBy: totalValueLockedUSD
     orderDirection: desc
@@ -13,8 +13,24 @@ query SearchPools($search: String!, $first: Int!) {
   ) {
     ...PoolFields
   }
-  asToken1: pools(
+  bySymbol1: pools(
     where: { token1_: { symbol_contains_nocase: $search } }
+    orderBy: totalValueLockedUSD
+    orderDirection: desc
+    first: $first
+  ) {
+    ...PoolFields
+  }
+  byName0: pools(
+    where: { token0_: { name_contains_nocase: $search } }
+    orderBy: totalValueLockedUSD
+    orderDirection: desc
+    first: $first
+  ) {
+    ...PoolFields
+  }
+  byName1: pools(
+    where: { token1_: { name_contains_nocase: $search } }
     orderBy: totalValueLockedUSD
     orderDirection: desc
     first: $first
@@ -105,7 +121,7 @@ def _to_pool_summary(raw: dict) -> PoolSummary:
 
 async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
     data = await graph_client.run_query(_SEARCH_QUERY, {"search": search, "first": limit})
-    raw_pools = data["asToken0"] + data["asToken1"]
+    raw_pools = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
     seen: set[str] = set()
     results: list[PoolSummary] = []
     for raw in raw_pools:

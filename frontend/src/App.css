@@ -90,6 +90,21 @@ body {
   line-height: 1.5;
 }
 
+.token-addresses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+.token-addresses a {
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
 /* Pool search */
 
 .pool-search__form {
