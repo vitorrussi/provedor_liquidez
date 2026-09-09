@@ -1,0 +1,116 @@
+import { useState } from 'react';
+import { api, ApiError } from '../api/client';
+import type { ImpermanentLossResponse, PoolDetail } from '../api/types';
+import { formatPercent, formatPrice } from '../format';
+
+interface Props {
+  pool: PoolDetail;
+}
+
+export function ImpermanentLossCalculator({ pool }: Props) {
+  const currentPrice = pool.token0_price;
+  const [entryPrice, setEntryPrice] = useState(currentPrice);
+  const [priceLower, setPriceLower] = useState(currentPrice * 0.8);
+  const [priceUpper, setPriceUpper] = useState(currentPrice * 1.2);
+  const [projectedPrice, setProjectedPrice] = useState(currentPrice);
+  const [result, setResult] = useState<ImpermanentLossResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleCalculate(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.computeImpermanentLoss({
+        entry_price: entryPrice,
+        current_price: projectedPrice,
+        price_lower: priceLower,
+        price_upper: priceUpper,
+      });
+      setResult(res);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Falha ao calcular');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card__header">
+        <h3>Calculadora de Impermanent Loss</h3>
+      </div>
+      <p className="muted">
+        Preço = {pool.token0.symbol} em {pool.token1.symbol}. Preço atual: {formatPrice(currentPrice)}
+      </p>
+
+      <form onSubmit={handleCalculate} className="form-grid">
+        <label>
+          Preço de entrada
+          <input
+            type="number"
+            step="any"
+            value={entryPrice}
+            onChange={(e) => setEntryPrice(Number(e.target.value))}
+          />
+        </label>
+        <label>
+          Preço projetado (cenário)
+          <input
+            type="number"
+            step="any"
+            value={projectedPrice}
+            onChange={(e) => setProjectedPrice(Number(e.target.value))}
+          />
+        </label>
+        <label>
+          Faixa mínima
+          <input
+            type="number"
+            step="any"
+            value={priceLower}
+            onChange={(e) => setPriceLower(Number(e.target.value))}
+          />
+        </label>
+        <label>
+          Faixa máxima
+          <input
+            type="number"
+            step="any"
+            value={priceUpper}
+            onChange={(e) => setPriceUpper(Number(e.target.value))}
+          />
+        </label>
+        <button type="submit" disabled={loading} className="btn btn--primary form-grid__submit">
+          {loading ? 'Calculando...' : 'Calcular IL'}
+        </button>
+      </form>
+
+      {error && <p className="error-text">{error}</p>}
+
+      {result && (
+        <div className="stat-grid stat-grid--compact">
+          <div className="stat">
+            <span className="stat__label">IL na faixa escolhida</span>
+            <span className={`stat__value ${result.impermanent_loss < 0 ? 'stat__value--negative' : ''}`}>
+              {formatPercent(result.impermanent_loss)}
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">IL equivalente em full-range (v2)</span>
+            <span className="stat__value">{formatPercent(result.impermanent_loss_full_range_equivalent)}</span>
+          </div>
+          <div className="stat">
+            <span className="stat__label">Multiplicador de concentração</span>
+            <span className="stat__value">{result.concentration_multiplier.toFixed(2)}x</span>
+          </div>
+        </div>
+      )}
+      <p className="footnote">
+        Faixas mais estreitas concentram capital (mais taxas enquanto o preço está dentro), mas também
+        ampliam o IL quando o preço se move — compare sempre com as taxas estimadas no simulador de faixa.
+      </p>
+    </div>
+  );
+}
