@@ -3,9 +3,18 @@
 Nenhuma função aqui faz I/O (rede, disco). Isso torna o módulo fácil de
 testar isoladamente e reutilizável em qualquer camada (API, script, notebook).
 
-Convenção de preço: em todo o módulo, "preço" significa token1 por token0
-(mesma convenção do campo `token0Price` do subgraph da Uniswap), já ajustado
-pelas casas decimais dos tokens. Faixas de posição são [Pa, Pb] com Pa < Pb.
+Convenção de preço: em todo o módulo, "preço" significa token0 por token1 —
+a mesma convenção do campo `token0Price` do subgraph da Uniswap (e das séries
+OHLC de `poolDayData`/`poolHourData`), já ajustado pelas casas decimais dos
+tokens. Para um pool USDC(token0)/WETH(token1), por exemplo, esse "preço" é
+o valor intuitivo "dólares por ETH". Faixas de posição são [Pa, Pb] com
+Pa < Pb, nessa mesma convenção.
+
+Atenção: essa é a convenção OPOSTA à usada na fórmula clássica do whitepaper
+da Uniswap v3 (que define preço como token1 por token0). As funções abaixo
+(amounts_for_liquidity, impermanent_loss_v3 etc.) já implementam a versão
+re-derivada para a convenção token0Price — não alimente-as com token1Price
+sem converter (veja token0_price_from_tick vs price_from_tick_token1).
 """
 
 from __future__ import annotations
@@ -14,18 +23,31 @@ import math
 from dataclasses import dataclass
 
 
-def price_from_tick(tick: int, decimals0: int, decimals1: int) -> float:
-    """Converte um tick da Uniswap v3 em preço (token1 por token0), já
-    ajustado pelas casas decimais dos dois tokens.
+def price_from_tick_token1(tick: int, decimals0: int, decimals1: int) -> float:
+    """Converte um tick da Uniswap v3 em preço na convenção token1 por token0
+    (== campo `token1Price` do subgraph), já ajustado pelas casas decimais.
 
     Fórmula: 1.0001^tick * 10^(decimals0 - decimals1)
+
+    Essa é a convenção NATIVA do whitepaper da Uniswap v3, mas é o INVERSO
+    do que o resto deste módulo usa (veja o docstring do módulo). Útil para
+    validação cruzada com o campo `token1Price` do subgraph, não para
+    alimentar amounts_for_liquidity/impermanent_loss_v3 diretamente.
     """
     return (1.0001**tick) * (10 ** (decimals0 - decimals1))
 
 
+def token0_price_from_tick(tick: int, decimals0: int, decimals1: int) -> float:
+    """Converte um tick da Uniswap v3 em preço na convenção token0 por token1
+    (== campo `token0Price` do subgraph) — a convenção usada pelo resto deste
+    módulo."""
+    return 1 / price_from_tick_token1(tick, decimals0, decimals1)
+
+
 def tick_from_price(price: float, decimals0: int, decimals1: int) -> float:
-    """Inverso de price_from_tick — útil para converter um preço-alvo de
-    range em tick (para exibição/validação, não para uso on-chain)."""
+    """Inverso de price_from_tick_token1 — útil para converter um preço-alvo
+    (convenção token1 por token0) em tick (para exibição/validação, não para
+    uso on-chain)."""
     if price <= 0:
         raise ValueError("price deve ser positivo")
     raw = price / (10 ** (decimals0 - decimals1))
@@ -39,13 +61,17 @@ class TokenAmounts:
 
 
 def amounts_for_liquidity(liquidity: float, price: float, price_lower: float, price_upper: float) -> TokenAmounts:
-    """Dado L (liquidez) e uma faixa [price_lower, price_upper], retorna as
-    quantidades de token0/token1 que compõem a posição no preço atual.
+    """Dado L (liquidez) e uma faixa [price_lower, price_upper] — convenção
+    token0 por token1 (veja docstring do módulo) — retorna as quantidades de
+    token0/token1 que compõem a posição no preço atual.
 
-    Implementa as três regiões da curva de liquidez concentrada da Uniswap v3
-    (whitepaper v3, seção 6.29-6.30):
-      - preço <= price_lower: posição 100% em token0
-      - preço >= price_upper: posição 100% em token1
+    Re-derivação das três regiões da curva de liquidez concentrada da
+    Uniswap v3 (whitepaper v3, seção 6.29-6.30) para a convenção token0Price
+    (Q = token0/token1 = 1/P, onde P é o preço nativo do whitepaper). Como Q
+    é o inverso de P, as regiões e o papel dos tokens se invertem em relação
+    à fórmula original:
+      - preço >= price_upper: posição 100% em token0 (ex: ETH caro -> só USDC)
+      - preço <= price_lower: posição 100% em token1 (ex: ETH barato -> só WETH)
       - preço dentro da faixa: mix dos dois tokens
     """
     if price_lower <= 0 or price_upper <= 0:
@@ -53,26 +79,26 @@ def amounts_for_liquidity(liquidity: float, price: float, price_lower: float, pr
     if price_lower >= price_upper:
         raise ValueError("price_lower deve ser menor que price_upper")
 
-    sqrt_p = math.sqrt(price)
-    sqrt_pa = math.sqrt(price_lower)
-    sqrt_pb = math.sqrt(price_upper)
+    sqrt_q = math.sqrt(price)
+    sqrt_qa = math.sqrt(price_lower)
+    sqrt_qb = math.sqrt(price_upper)
 
     if price <= price_lower:
-        amount0 = liquidity * (1 / sqrt_pa - 1 / sqrt_pb)
-        amount1 = 0.0
-    elif price >= price_upper:
         amount0 = 0.0
-        amount1 = liquidity * (sqrt_pb - sqrt_pa)
+        amount1 = liquidity * (1 / sqrt_qa - 1 / sqrt_qb)
+    elif price >= price_upper:
+        amount0 = liquidity * (sqrt_qb - sqrt_qa)
+        amount1 = 0.0
     else:
-        amount0 = liquidity * (1 / sqrt_p - 1 / sqrt_pb)
-        amount1 = liquidity * (sqrt_p - sqrt_pa)
+        amount0 = liquidity * (sqrt_q - sqrt_qa)
+        amount1 = liquidity * (1 / sqrt_q - 1 / sqrt_qb)
 
     return TokenAmounts(amount0=amount0, amount1=amount1)
 
 
 def position_value(amounts: TokenAmounts, price: float) -> float:
-    """Valor da posição em unidades de token1 (preço = token1 por token0)."""
-    return amounts.amount0 * price + amounts.amount1
+    """Valor da posição em unidades de token0 (preço = token0 por token1)."""
+    return amounts.amount0 + amounts.amount1 * price
 
 
 def impermanent_loss_v2(price_ratio: float) -> float:

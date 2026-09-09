@@ -7,26 +7,41 @@ from app import indicators as ind
 
 class TestPriceFromTick:
     def test_roundtrip(self):
-        price = ind.price_from_tick(tick=200_000, decimals0=18, decimals1=6)
+        price = ind.price_from_tick_token1(tick=200_000, decimals0=18, decimals1=6)
         tick_back = ind.tick_from_price(price, decimals0=18, decimals1=6)
         assert tick_back == pytest.approx(200_000, abs=1e-6)
 
     def test_tick_zero_equals_decimals_adjustment(self):
         # tick=0 -> 1.0001^0 = 1, então price = 10^(dec0-dec1)
-        price = ind.price_from_tick(tick=0, decimals0=18, decimals1=6)
+        price = ind.price_from_tick_token1(tick=0, decimals0=18, decimals1=6)
         assert price == pytest.approx(10**12)
+
+    def test_token0_price_is_reciprocal_of_token1_price(self):
+        p1 = ind.price_from_tick_token1(tick=198_131, decimals0=6, decimals1=18)
+        p0 = ind.token0_price_from_tick(tick=198_131, decimals0=6, decimals1=18)
+        assert p0 == pytest.approx(1 / p1)
+
+    def test_token0_price_matches_live_subgraph_reference(self):
+        # Valores capturados de uma consulta real ao subgraph em 2026-09-09
+        # (pool USDC(token0,6dec)/WETH(token1,18dec), tick=198131):
+        # token0Price=2486.9904226052076, token1Price=0.00040209242098828264
+        p0 = ind.token0_price_from_tick(tick=198_131, decimals0=6, decimals1=18)
+        assert p0 == pytest.approx(2486.99, rel=1e-4)
 
 
 class TestAmountsForLiquidity:
-    def test_below_range_all_token0(self):
+    def test_below_range_all_token1(self):
+        # Convenção token0Price (Q = token0/token1): preço abaixo da faixa
+        # (ex: ETH barato) -> posição 100% no token "caro-relativo", token1.
         amounts = ind.amounts_for_liquidity(liquidity=1000, price=1.0, price_lower=2.0, price_upper=4.0)
-        assert amounts.amount1 == 0.0
-        assert amounts.amount0 > 0
-
-    def test_above_range_all_token1(self):
-        amounts = ind.amounts_for_liquidity(liquidity=1000, price=10.0, price_lower=2.0, price_upper=4.0)
         assert amounts.amount0 == 0.0
         assert amounts.amount1 > 0
+
+    def test_above_range_all_token0(self):
+        # Preço acima da faixa (ex: ETH caro) -> posição 100% em token0.
+        amounts = ind.amounts_for_liquidity(liquidity=1000, price=10.0, price_lower=2.0, price_upper=4.0)
+        assert amounts.amount1 == 0.0
+        assert amounts.amount0 > 0
 
     def test_in_range_has_both(self):
         amounts = ind.amounts_for_liquidity(liquidity=1000, price=3.0, price_lower=2.0, price_upper=4.0)
@@ -75,12 +90,16 @@ class TestImpermanentLossV3ConcentratedRange:
         il_full = ind.impermanent_loss_v3(entry_price, current_price, 1e-9, 1e9)
         assert il_narrow < il_full
 
-    def test_price_exits_range_above_100pct_token1(self):
+    def test_price_exits_range_above_100pct_token0(self):
         entry_price = 100.0
         current_price = 200.0
         price_lower, price_upper = 90.0, 110.0
         il = ind.impermanent_loss_v3(entry_price, current_price, price_lower, price_upper)
         assert il < 0
+
+        amounts = ind.amounts_for_liquidity(1.0, current_price, price_lower, price_upper)
+        assert amounts.amount1 == 0.0
+        assert amounts.amount0 > 0
 
 
 class TestConcentrationMultiplier:
