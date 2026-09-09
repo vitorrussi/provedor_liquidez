@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
-import type { PoolSummary } from '../api/types';
+import type { AssetIndexRow, PoolSummary } from '../api/types';
 import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
+import { SortableHeader } from './SortableHeader';
 
 type SortKey = 'pair' | 'tvl' | 'vol1d' | 'vol30d' | 'vol1dTvl' | 'apr' | 'volume';
 type SortDirection = 'asc' | 'desc';
@@ -39,6 +40,37 @@ export function PoolSearch() {
   const [sortKey, setSortKey] = useState<SortKey>('tvl');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [hideZeroVolume, setHideZeroVolume] = useState(false);
+
+  // Sugestões de autocomplete vêm do índice local (SQLite, ver
+  // backend/app/local_db.py), não do gateway do Graph -- por isso pode
+  // consultar a cada tecla digitada sem custar cota. Se o índice nunca foi
+  // construído (ver /assets), a lista de sugestões só fica vazia; a busca
+  // "de verdade" (Enter/botão Buscar) continua funcionando normalmente.
+  const [suggestions, setSuggestions] = useState<AssetIndexRow[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .suggestAssets(term, 8)
+        .then((rows) => {
+          if (!cancelled) setSuggestions(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
 
   useEffect(() => {
     setQuery(urlQuery);
@@ -80,7 +112,14 @@ export function PoolSearch() {
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
+    setShowSuggestions(false);
     setSearchParams({ q: query.trim() });
+  }
+
+  function handleSuggestionSelect(asset: AssetIndexRow) {
+    setQuery(asset.symbol);
+    setShowSuggestions(false);
+    setSearchParams({ q: asset.symbol });
   }
 
   function handleSelect(pool: PoolSummary) {
@@ -118,14 +157,42 @@ export function PoolSearch() {
 
   return (
     <div className="pool-search">
+      <div className="pool-search__nav">
+        <Link to="/assets" className="btn btn--secondary">
+          Ver todos os ativos
+        </Link>
+        <Link to="/pools" className="btn btn--secondary">
+          Ver todas as pools
+        </Link>
+      </div>
+
       <form onSubmit={handleSearch} className="pool-search__form">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por token (ex: ETH, USDC, WBTC)"
-          className="pool-search__input"
-        />
+        <div className="pool-search__input-wrap">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            placeholder="Buscar por token (ex: ETH, USDC, WBTC)"
+            className="pool-search__input"
+            autoComplete="off"
+          />
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="pool-search__suggestions">
+              {suggestions.map((asset) => (
+                <li key={asset.id}>
+                  <button type="button" onMouseDown={() => handleSuggestionSelect(asset)}>
+                    <span className="pool-search__suggestion-symbol">{asset.symbol}</span>
+                    <span className="pool-search__suggestion-name muted">{asset.name}</span>
+                    {asset.category && <span className="badge">{asset.category}</span>}
+                    <span className="pool-search__suggestion-tvl muted">{formatUsd(asset.total_tvl_usd)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button type="submit" disabled={loading} className="btn btn--primary">
           {loading ? 'Buscando...' : 'Buscar'}
         </button>
@@ -277,30 +344,5 @@ export function PoolSearch() {
         </>
       )}
     </div>
-  );
-}
-
-interface SortableHeaderProps {
-  className: string;
-  label: string;
-  title?: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
-  direction: SortDirection;
-  onSort: (key: SortKey) => void;
-}
-
-function SortableHeader({ className, label, title, sortKey, activeKey, direction, onSort }: SortableHeaderProps) {
-  const active = sortKey === activeKey;
-  return (
-    <button
-      type="button"
-      className={`pool-list__header-btn ${className} ${active ? 'pool-list__header-btn--active' : ''}`}
-      title={title}
-      onClick={() => onSort(sortKey)}
-    >
-      {label}
-      <span className="pool-list__sort-arrow">{active ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
-    </button>
   );
 }

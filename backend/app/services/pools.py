@@ -16,6 +16,47 @@ from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Toke
 V2_FEE_TIER = 3000  # unidades de feeTier da v3 (1e-6): 3000 == 0,30%
 V2_FEE_RATE = 0.003
 
+# Heurísticas de sanidade pra pool -- achados reais ao construir o índice
+# local (ver services/index_builder.py e CLAUDE.md). Dois padrões distintos
+# de dado corrompido/manipulado observados em pools de token desconhecido:
+#
+# (a) TVL fisicamente impossível: algumas pools v2 reportam `reserveUSD` tipo
+#     3,5e+34 (maior que todo o mercado cripto junto) -- provavelmente um
+#     token com decimals manipulados enganando o cálculo de preço derivado
+#     do subgraph. $10B é generoso o bastante pra nunca cortar uma pool real
+#     (a maior já vista na Uniswap ficou na casa de poucos bilhões).
+#
+# (b) "Taxa" tipo 99,999% (feeTier ~999000-999990) combinada com centenas de
+#     milhões/bilhões de TVL "fake" e volume quase nulo -- um padrão tipo
+#     honeypot/troll pool, não uma pool real (ninguém troca de verdade a
+#     99,999% de taxa). Nenhuma taxa realista passa de ~10% nessa unidade
+#     (1e-6); a sentinel de taxa dinâmica da v4 (mesmo valor documentado em
+#     frontend/src/format.ts::DYNAMIC_FEE_SENTINEL, mantido em sincronia
+#     manualmente) é uma exceção deliberada, não um erro.
+#
+# Sem esses filtros, esse tipo de lixo vira o "#1 por TVL" em qualquer lista
+# ordenada por TVL -- inclusive em /related pra um token legítimo que por
+# acaso forma pool com um desses.
+_MAX_SANE_TVL_USD = 10_000_000_000.0
+_MAX_SANE_FEE_TIER = 100_000  # 10%, unidade 1e-6
+_DYNAMIC_FEE_SENTINEL = 8_388_608
+_MIN_TVL_REQUIRING_VOLUME_USD = 1_000_000  # acima disso, TVL sem volume histórico relevante é suspeito
+# Não é "== 0" -- achado real testando esse filtro: uma pool com TVL de $1B
+# "reservou" exatos $1,00 de volume histórico (provavelmente pra escapar de
+# um filtro ingênuo de "volume zero"). Qualquer pool de verdade nesse
+# patamar de TVL teria muito mais que $100 de volume acumulado.
+_MIN_PLAUSIBLE_VOLUME_USD = 100.0
+
+
+def _is_plausible_pool(total_value_locked_usd: float, fee_tier: int, volume_usd: float) -> bool:
+    if total_value_locked_usd > _MAX_SANE_TVL_USD:
+        return False
+    if fee_tier > _MAX_SANE_FEE_TIER and fee_tier != _DYNAMIC_FEE_SENTINEL:
+        return False
+    if total_value_locked_usd > _MIN_TVL_REQUIRING_VOLUME_USD and volume_usd < _MIN_PLAUSIBLE_VOLUME_USD:
+        return False
+    return True
+
 # Qual chain cada protocolo vive -- v2/v3/v4 são todos Ethereum mainnet
 # (mesmos endereços de token, mesmo RPC de verificação on-chain); Aerodrome
 # Slipstream é Base mainnet, uma chain totalmente separada (endereços de
@@ -480,6 +521,8 @@ async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
         if isinstance(r, BaseException):
             continue
         results.extend(r)
+    # Descarta pools com dados corrompidos/manipulados -- ver _is_plausible_pool.
+    results = [p for p in results if _is_plausible_pool(p.total_value_locked_usd, p.fee_tier, p.volume_usd)]
     results.sort(key=lambda p: p.total_value_locked_usd, reverse=True)
     results = results[:limit]
 
@@ -772,7 +815,13 @@ async def get_related_pools(pool_id: str) -> list[PoolSummary]:
     # TVL abaixo de ~$1k é essencialmente poeira (pool de teste/esquecida) e
     # o APR calculado sobre um denominador tão pequeno vira ruído sem sentido
     # (já vimos casos de >1000000% "APR" nesses pools) -- não ajuda a comparar
-    # onde a liquidez de verdade está, então não mostramos.
-    results = [p for p in results if p.total_value_locked_usd >= 1_000]
+    # onde a liquidez de verdade está, então não mostramos. Do outro lado,
+    # descarta pools com dados corrompidos/manipulados (ver _is_plausible_pool)
+    # -- senão um token legítimo que por acaso forma pool com um token scam
+    # de TVL/taxa fake mostra esse lixo como "#1 relacionado".
+    results = [
+        p for p in results
+        if p.total_value_locked_usd >= 1_000 and _is_plausible_pool(p.total_value_locked_usd, p.fee_tier, p.volume_usd)
+    ]
     results.sort(key=lambda p: p.total_value_locked_usd, reverse=True)
     return results[:6]

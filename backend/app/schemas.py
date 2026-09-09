@@ -118,3 +118,53 @@ class GraphRequestLogEntry(BaseModel):
     status: str
     duration_ms: float
     error: str | None = None
+
+
+class AssetTopPair(BaseModel):
+    symbol: str
+    tvl_usd: float
+
+
+class AssetIndexRow(BaseModel):
+    id: str
+    chain: str
+    address: str
+    symbol: str
+    name: str
+    decimals: int
+    category: str | None
+    pools_count: int
+    total_tvl_usd: float
+    top_pairs: list[AssetTopPair]
+
+
+class AssetIndexResponse(BaseModel):
+    items: list[AssetIndexRow]
+    total: int
+
+
+class PoolIndexRow(BaseModel):
+    id: str
+    protocol: str
+    chain: str
+    token0_symbol: str
+    token0_address: str
+    token1_symbol: str
+    token1_address: str
+    fee_tier: int
+    total_value_locked_usd: float
+    volume_usd: float
+    created_at: int | None
+
+
+class PoolIndexResponse(BaseModel):
+    items: list[PoolIndexRow]
+    total: int
+
+
+class IndexStatusResponse(BaseModel):
+    updated_at: int | None
+    min_tvl_usd: float | None
+    total_assets: int
+    total_pools: int
+    protocol_errors: dict[str, str]

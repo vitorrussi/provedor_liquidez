@@ -2,14 +2,18 @@ import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import './App.css';
 import { PoolSearch } from './components/PoolSearch';
 import { UsageBadge } from './components/UsageBadge';
+import { AssetsPage } from './pages/AssetsPage';
 import { PoolPage } from './pages/PoolPage';
+import { PoolsIndexPage } from './pages/PoolsIndexPage';
+
+const WIDE_PATH_PREFIXES = ['/pool/', '/assets', '/pools'];
 
 function App() {
   const location = useLocation();
-  const isPoolPage = location.pathname.startsWith('/pool/');
+  const isWide = WIDE_PATH_PREFIXES.some((prefix) => location.pathname.startsWith(prefix));
 
   return (
-    <div className={`app ${isPoolPage ? 'app--wide' : ''}`}>
+    <div className={`app ${isWide ? 'app--wide' : ''}`}>
       <header className="app__header">
         <Link to="/" className="app__home-link">
           <h1>Provedor de Liquidez</h1>
@@ -21,6 +25,8 @@ function App() {
         <Routes>
           <Route path="/" element={<PoolSearch />} />
           <Route path="/pool/:id" element={<PoolPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/pools" element={<PoolsIndexPage />} />
         </Routes>
       </main>
 

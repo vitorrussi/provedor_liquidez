@@ -101,3 +101,53 @@ export interface GraphUsageResponse {
   limit: number;
   remaining: number;
 }
+
+export interface AssetTopPair {
+  symbol: string;
+  tvl_usd: number;
+}
+
+export interface AssetIndexRow {
+  id: string;
+  chain: string;
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  category: string | null;
+  pools_count: number;
+  total_tvl_usd: number;
+  top_pairs: AssetTopPair[];
+}
+
+export interface AssetIndexResponse {
+  items: AssetIndexRow[];
+  total: number;
+}
+
+export interface PoolIndexRow {
+  id: string;
+  protocol: Protocol;
+  chain: string;
+  token0_symbol: string;
+  token0_address: string;
+  token1_symbol: string;
+  token1_address: string;
+  fee_tier: number;
+  total_value_locked_usd: number;
+  volume_usd: number;
+  created_at: number | null;
+}
+
+export interface PoolIndexResponse {
+  items: PoolIndexRow[];
+  total: number;
+}
+
+export interface IndexStatusResponse {
+  updated_at: number | null;
+  min_tvl_usd: number | null;
+  total_assets: number;
+  total_pools: number;
+  protocol_errors: Record<string, string>;
+}

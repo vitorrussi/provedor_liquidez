@@ -73,6 +73,15 @@ export function formatDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleDateString('pt-BR');
 }
 
+export function formatDateTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString('pt-BR');
+}
+
+// Espelha backend/app/token_categories.py::ALL_CATEGORIES -- lista fixa e
+// pequena, não vale a pena um endpoint só pra isso. Se adicionar uma
+// categoria nova lá, adicione aqui também.
+export const ASSET_CATEGORIES = ['Stablecoin (USD)', 'ETH / LST', 'BTC', 'Governança de DEX'];
+
 export function truncateAddress(address: string): string {
   if (address.length <= 12) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;

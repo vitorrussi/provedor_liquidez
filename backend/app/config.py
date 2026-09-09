@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     base_rpc_url: str = "https://mainnet.base.org"
 
+    # Piso de TVL (pools v3/v4/aerodrome) / reserva (pares v2) usado ao
+    # reconstruir o índice local de ativos/pools (ver services/index_builder.py
+    # e local_db.py) -- mesmo piso já usado como filtro de "poeira" em
+    # get_related_pools. Só afeta o índice local (/api/index/*), não a busca
+    # ao vivo (/api/pools/search).
+    index_min_tvl_usd: float = 1000.0
+
     def graph_gateway_url(self, protocol: str = "v3") -> str:
         subgraph_id = {
             "v2": self.uniswap_v2_subgraph_id,

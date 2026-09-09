@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import request_log
 from .config import get_settings
-from .routers import indicators, pools
+from .routers import indicators, local_index, pools
 from .schemas import GraphRequestLogEntry, GraphUsageResponse
 from .usage_tracker import get_usage
 
@@ -19,6 +19,7 @@ app.add_middleware(
 
 app.include_router(pools.router)
 app.include_router(indicators.router)
+app.include_router(local_index.router)
 
 
 @app.get("/api/health")

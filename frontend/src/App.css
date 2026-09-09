@@ -577,3 +577,171 @@ body {
   pointer-events: none;
   user-select: none;
 }
+
+/* Botões secundários (navegação pras páginas de índice, atualizar lista) */
+
+.btn--secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn--secondary:hover {
+  border-color: var(--accent);
+}
+
+/* Navegação da busca principal pras páginas /assets e /pools */
+
+.pool-search__nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Autocomplete do campo de busca principal (alimentado pelo índice local) */
+
+.pool-search__input-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.pool-search__input-wrap .pool-search__input {
+  width: 100%;
+}
+
+.pool-search__suggestions {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.pool-search__suggestions button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pool-search__suggestions button:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.pool-search__suggestion-symbol {
+  font-weight: 600;
+}
+
+.pool-search__suggestion-name {
+  flex: 1;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool-search__suggestion-tvl {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Barra de "última atualização" + botão de atualizar (/assets e /pools) */
+
+.index-refresh-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.index-refresh-bar__info {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.index-refresh-bar__warning {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* Páginas de índice (/assets e /pools) */
+
+.index-page__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.index-page__controls .pool-search__input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.index-page__controls select {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.index-page__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+  font-size: 0.85rem;
+}
+
+/* Grades de coluna específicas pras tabelas de /assets e /pools -- não têm
+   coluna de "#" (rank) e têm número de colunas diferente da lista de busca
+   principal, então não reaproveitam o grid-template-columns padrão de
+   .pool-list__header/.pool-list__item. */
+
+.pool-list__header--assets,
+.pool-list__item--assets {
+  grid-template-columns: minmax(160px, 1.6fr) repeat(3, minmax(90px, 1fr)) minmax(140px, 1.4fr);
+  min-width: 680px;
+}
+
+.pool-list__header--pools-index,
+.pool-list__item--pools-index {
+  grid-template-columns: minmax(170px, 1.6fr) repeat(5, minmax(90px, 1fr));
+  min-width: 720px;
+}
+
+.pool-list__item--static {
+  cursor: default;
+}
+
+.pool-list__item--static:hover {
+  background: none;
+}

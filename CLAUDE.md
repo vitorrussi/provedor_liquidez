@@ -143,6 +143,61 @@ desse sentinel.
 sem ele, um pool com TVL de poucos dólares e algum volume registrado produz um "APR" de milhares de
 por cento, tecnicamente correto pela conta mas sem nenhum valor informativo.
 
+## Índice local (SQLite): /assets, /pools e autocomplete
+
+Além da busca ao vivo no Graph (`/api/pools/search`), o app mantém um índice local (SQLite,
+`backend/data/local_index.db`, gitignored) com todos os ativos e pools "relevantes" (TVL/reserva >=
+`Settings.index_min_tvl_usd`, default $1.000 -- mesmo piso já usado em `get_related_pools`). Serve
+três coisas: as páginas `/assets` e `/pools` (tabelas ordenáveis/filtráveis/paginadas server-side, ver
+`routers/local_index.py`), e o autocomplete do campo de busca principal
+(`GET /api/index/assets/suggest`, usado por `PoolSearch.tsx`) -- que por isso não gasta cota do Graph
+a cada tecla digitada, já que consulta só o SQLite local.
+
+**Não atualiza sozinho.** Só quando alguém clica em "Atualizar lista" (`POST /api/index/refresh`,
+`IndexRefreshBar.tsx`, usado em ambas as páginas) é que `services/index_builder.py` faz um crawl
+completo dos 4 subgraphs (em paralelo) e substitui o conteúdo inteiro das tabelas de uma vez. Motivo
+de ser manual: com o piso de $1k, o total observado em 2026-09-09 foi **~35 mil ativos / ~42 mil
+pools**, exigindo ~60-90 consultas ao gateway e ~30-40s de execução -- barato o bastante pra não
+importar (uma fração de 1% da cota mensal de 100k), mas caro o bastante pra não rodar a cada
+carregamento de página. A paginação usa cursor (`id_gt`), não `skip`/`offset` -- o Graph limita
+`skip` a 5000 e a v3 mainnet sozinha já passa disso com folga (~7900 pools com TVL >= $1k, medido
+antes desse teto entrar em vigor).
+
+Se algum dos 4 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
+parcialmente atualizado, não é tudo-ou-nada) e o motivo fica em `protocol_errors` na resposta --
+`IndexRefreshBar` mostra um aviso quando isso acontece. Só se os 4 falharem é que o índice existente
+é preservado sem alteração (nunca sobrescreve com um índice vazio).
+
+**Achado real ao construir esse índice pela primeira vez**: ordenar por TVL descendente expôs dois
+padrões de dado corrompido/manipulado que a busca ao vivo (que também ordena por TVL) já estava
+igualmente exposta a, só que sem ter sido notado antes por não existir uma lista completa pra olhar.
+Ambos ficaram documentados como `_is_plausible_pool()` em `services/pools.py` (usado tanto no índice
+quanto em `search_pools`/`get_related_pools` -- não é exclusivo do índice):
+- **TVL fisicamente impossível** (`_MAX_SANE_TVL_USD`, $10B): uma pool v2 chegou a reportar
+  `reserveUSD` de ~3,5e+34 (maior que todo o mercado cripto junto) -- provavelmente um token com
+  decimals manipulados enganando o cálculo de preço derivado do subgraph.
+- **"Taxa" tipo honeypot** (`_MAX_SANE_FEE_TIER`, 10% -- exceto a sentinel de taxa dinâmica da v4,
+  `_DYNAMIC_FEE_SENTINEL`) **combinada com volume histórico quase nulo** (`_MIN_PLAUSIBLE_VOLUME_USD`,
+  $100 acima de `_MIN_TVL_REQUIRING_VOLUME_USD` = $1M de TVL): pools com `feeTier` tipo 999990
+  (99,999%) e centenas de milhões/bilhões de TVL "fake", volume histórico de $0 a poucos dólares (uma
+  chegou a mostrar exatos $1,00 de volume pra um TVL de $1B -- parece ter sido calibrado pra escapar
+  de um filtro ingênuo de "volume zero"). Esse é um filtro heurístico, não uma garantia -- se aparecer
+  lixo novo desse tipo, ajuste os limiares em vez de assumir que "não tem mais nenhum".
+
+Categoria de ativo (`token_categories.py`, ex: "Stablecoin (USD)", "ETH / LST", "BTC") é um
+mapeamento **fixo por símbolo, não verificado on-chain** -- qualquer um pode criar um token com esse
+mesmo símbolo (mesmo aviso já existente em `PoolOverview` sobre confiar no endereço do contrato, não
+no nome/símbolo). "Principais pares" de cada ativo (usado como aproximação de "correlação") é
+calculado a partir das próprias pools indexadas -- soma o TVL por símbolo de contraparte e pega os 3
+maiores -- não é correlação de preço calculada.
+
+Frontend: `SortableHeader.tsx` foi extraído de `PoolSearch.tsx` pra ser reaproveitado por
+`AssetsPage.tsx`/`PoolsIndexPage.tsx` (mesmo componente visual, mas cada página ordena/pagina
+server-side via `sort`/`order`/`limit`/`offset`, diferente de `PoolSearch` que ordena os até 50
+resultados no cliente). As duas tabelas usam classes de grid próprias
+(`.pool-list__header--assets`/`--pools-index`) porque têm número de colunas diferente da lista de
+busca principal (sem coluna de "#").
+
 ## Preferência do usuário: não derrubar o servidor de dev à toa
 
 **Antes de editar código, rode `scripts/dev.sh status`.** Se os dois (backend/frontend) já
@@ -252,29 +307,37 @@ seedado manualmente).
 
 ```
 backend/app/
-  indicators.py       # matemática pura (IL, APR, volatilidade, replay de faixa) — sem I/O
-  graph_client.py      # cliente HTTP fino pro gateway do The Graph (key nunca sai daqui)
-  usage_tracker.py     # contador local de consultas
-  services/pools.py    # queries GraphQL + mapeamento pros schemas
-  routers/              # rotas FastAPI
-  schemas.py            # modelos Pydantic (request/response)
-  config.py             # settings via pydantic-settings (.env)
+  indicators.py             # matemática pura (IL, APR, volatilidade, replay de faixa) — sem I/O
+  graph_client.py            # cliente HTTP fino pro gateway do The Graph (key nunca sai daqui)
+  usage_tracker.py           # contador local de consultas
+  services/pools.py          # queries GraphQL ao vivo + mapeamento pros schemas
+  services/index_builder.py  # crawl completo pra reconstruir o índice local (ver seção acima)
+  local_db.py                 # SQLite do índice local (assets/pools/index_meta)
+  token_categories.py         # mapeamento fixo símbolo -> categoria (ver seção acima)
+  routers/                    # rotas FastAPI (inclui local_index.py, prefixo /api/index)
+  schemas.py                  # modelos Pydantic (request/response)
+  config.py                   # settings via pydantic-settings (.env)
 
 frontend/src/
-  api/client.ts         # wrapper fetch tipado pro backend
-  components/           # um componente por seção do dashboard
-  pages/PoolPage.tsx    # página de detalhe do pool (rota /pool/:id)
-  format.ts              # helpers de formatação (USD, %, preço, data)
+  api/client.ts               # wrapper fetch tipado pro backend
+  components/                 # um componente por seção do dashboard
+  components/SortableHeader.tsx  # cabeçalho de coluna clicável, reaproveitado em 3 tabelas
+  pages/PoolPage.tsx          # página de detalhe do pool (rota /pool/:id)
+  pages/AssetsPage.tsx        # lista de ativos (rota /assets)
+  pages/PoolsIndexPage.tsx    # lista completa de pools (rota /pools)
+  format.ts                    # helpers de formatação (USD, %, preço, data)
 ```
 
 ## Navegação (react-router-dom)
 
-Duas rotas, definidas em `App.tsx` (que também é o layout compartilhado — header/footer/`UsageBadge`
+Quatro rotas, definidas em `App.tsx` (que também é o layout compartilhado — header/footer/`UsageBadge`
 ficam fora do `<Routes>`): `/` é a busca (`components/PoolSearch.tsx`, que já é a "página" — não tem
-um `SearchPage.tsx` separado) e `/pool/:id` é o detalhe (`pages/PoolPage.tsx`). O `id` da rota é o id
-prefixado por protocolo (`v3:0xabc...`) vindo de `PoolSummary.id`, sempre passado por
-`encodeURIComponent` ao montar o link/navigate (por causa do `:`) e por `decodeURIComponent` ao ler
-de volta em `useParams()`.
+um `SearchPage.tsx` separado), `/pool/:id` é o detalhe (`pages/PoolPage.tsx`), `/assets` é a lista de
+ativos e `/pools` a lista completa de pools (ambas do índice local, ver seção acima). `WIDE_PATH_PREFIXES`
+em `App.tsx` decide quais rotas usam o layout largo (`.app--wide`) -- inclui as três últimas. O `id` da
+rota de detalhe é o id prefixado por protocolo (`v3:0xabc...`) vindo de `PoolSummary.id`, sempre
+passado por `encodeURIComponent` ao montar o link/navigate (por causa do `:`) e por
+`decodeURIComponent` ao ler de volta em `useParams()`.
 
 O termo de busca fica sincronizado com a URL (`/?q=termo`, via `useSearchParams` dentro do próprio
 `PoolSearch`) — é assim que o botão voltar do navegador consegue restaurar a lista depois de abrir um
