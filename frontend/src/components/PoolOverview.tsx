@@ -1,13 +1,18 @@
-import type { PoolIndicatorsResponse } from '../api/types';
+import type { PoolDetail } from '../api/types';
 import { etherscanTokenUrl, formatFeeTier, formatPercent, formatPrice, formatUsd, truncateAddress } from '../format';
 
-interface Props {
-  data: PoolIndicatorsResponse;
+interface IndicatorStats {
+  fee_apr_full_range_30d: number;
+  annualized_volatility_30d: number;
 }
 
-export function PoolOverview({ data }: Props) {
-  const { pool, fee_apr_full_range_30d, annualized_volatility_30d } = data;
+interface Props {
+  pool: PoolDetail;
+  indicators: IndicatorStats | null;
+  indicatorsNote: string | null;
+}
 
+export function PoolOverview({ pool, indicators, indicatorsNote }: Props) {
   return (
     <div className="card">
       <div className="card__header">
@@ -33,18 +38,47 @@ export function PoolOverview({ data }: Props) {
           <span className="stat__value">{formatPrice(pool.token0_price)}</span>
         </div>
         <div className="stat">
-          <span className="stat__label">APR de taxas (full-range, 30d)</span>
-          <span className="stat__value stat__value--highlight">{formatPercent(fee_apr_full_range_30d)}</span>
-        </div>
-        <div className="stat">
-          <span className="stat__label">Volatilidade anualizada (30d)</span>
-          <span className="stat__value">{formatPercent(annualized_volatility_30d)}</span>
+          <span className="stat__label">Taxas geradas (total histórico)</span>
+          <span className="stat__value">{formatUsd(pool.fees_usd_lifetime)}</span>
         </div>
         <div className="stat">
           <span className="stat__label">Transações</span>
           <span className="stat__value">{pool.tx_count.toLocaleString('pt-BR')}</span>
         </div>
+        <div className="stat">
+          <span className="stat__label">Tick atual</span>
+          <span className="stat__value">{pool.tick ?? '—'}</span>
+        </div>
+
+        {indicators ? (
+          <>
+            <div className="stat">
+              <span className="stat__label">APR de taxas (full-range, 30d)</span>
+              <span className="stat__value stat__value--highlight">
+                {formatPercent(indicators.fee_apr_full_range_30d)}
+              </span>
+            </div>
+            <div className="stat">
+              <span className="stat__label">Volatilidade anualizada (30d)</span>
+              <span className="stat__value">{formatPercent(indicators.annualized_volatility_30d)}</span>
+            </div>
+          </>
+        ) : (
+          <div className="stat stat--wide">
+            <span className="stat__label">APR de taxas / Volatilidade (30d)</span>
+            <span className="stat__value stat__value--muted">indisponível</span>
+          </div>
+        )}
       </div>
+
+      {indicatorsNote && (
+        <p className="status-box status-box--note">
+          Não deu para calcular APR/volatilidade dos últimos 30 dias para este pool: {indicatorsNote} Isso é comum
+          em pools com pouquíssimo TVL/negociação — os dados básicos acima (TVL, preço, taxas, transações) ainda
+          são os valores reais do contrato.
+        </p>
+      )}
+
       <div className="token-addresses">
         <span className="muted">
           Contrato {pool.token0.symbol}:{' '}

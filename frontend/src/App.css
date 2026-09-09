@@ -83,6 +83,14 @@ body {
   background: color-mix(in srgb, var(--negative) 8%, var(--surface));
 }
 
+.status-box--note {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .footnote {
   color: var(--muted);
   font-size: 0.82rem;
@@ -358,6 +366,22 @@ body {
 
 .stat__value--negative {
   color: var(--negative);
+}
+
+.stat__value--muted {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.95rem;
+}
+
+.stat--wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 600px) {
+  .stat--wide {
+    grid-column: span 1;
+  }
 }
 
 /* Forms */
