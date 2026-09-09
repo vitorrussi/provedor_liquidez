@@ -153,25 +153,33 @@ body {
   cursor: pointer;
 }
 
+.pool-table {
+  overflow-x: auto;
+}
+
 .pool-list__header,
 .pool-list__item {
   display: grid;
-  grid-template-columns: 1fr 70px 110px 110px;
+  grid-template-columns: 28px minmax(170px, 1.6fr) repeat(6, minmax(88px, 1fr));
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 760px;
 }
 
 .pool-list__header {
   padding: 0 16px 8px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.pool-list__header .pool-list__fee,
-.pool-list__header .pool-list__tvl,
-.pool-list__header .pool-list__volume {
+.pool-list__rank {
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+.pool-list__header .pool-list__col {
   text-align: right;
   justify-content: flex-end;
 }
@@ -217,7 +225,7 @@ body {
 }
 
 .pool-list__item {
-  padding: 12px 16px;
+  padding: 10px 16px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
   transition: background 0.15s ease;
@@ -232,19 +240,27 @@ body {
 }
 
 .pool-list__pair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pool-list__pair-main {
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pool-list__fee,
-.pool-list__tvl,
-.pool-list__volume {
+.pool-list__pair-sub {
+  font-size: 0.72rem;
+}
+
+.pool-list__col {
   color: var(--muted);
   font-size: 0.85rem;
   text-align: right;

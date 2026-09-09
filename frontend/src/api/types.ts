@@ -12,6 +12,10 @@ export interface PoolSummary {
   fee_tier: number;
   total_value_locked_usd: number;
   volume_usd: number;
+  volume_1d_usd: number;
+  volume_30d_usd: number;
+  volume_1d_over_tvl: number;
+  apr_pool_30d: number;
 }
 
 export interface PoolDetail extends PoolSummary {

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from .. import graph_client
+import time
+
+from .. import graph_client, indicators
 from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Token
 
 _SEARCH_QUERY = """
@@ -46,6 +48,23 @@ fragment PoolFields on Pool {
   volumeUSD
   token0 { id symbol name decimals }
   token1 { id symbol name decimals }
+}
+"""
+
+_BATCH_DAY_DATA_QUERY = """
+query BatchPoolDayData($poolIds: [String!]!, $since: Int!, $first: Int!, $skip: Int!) {
+  poolDayDatas(
+    where: { pool_in: $poolIds, date_gte: $since }
+    orderBy: date
+    orderDirection: desc
+    first: $first
+    skip: $skip
+  ) {
+    pool { id }
+    date
+    volumeUSD
+    feesUSD
+  }
 }
 """
 
@@ -119,6 +138,60 @@ def _to_pool_summary(raw: dict) -> PoolSummary:
     )
 
 
+async def _fetch_recent_day_data_batch(pool_ids: list[str], days: int = 30) -> dict[str, list[tuple[int, float, float]]]:
+    """Busca poolDayData dos últimos `days` dias para vários pools de uma vez
+    (1-2 chamadas ao gateway no total, não uma por pool), agrupando por pool id.
+
+    Pagina em até 2 páginas de 1000 linhas (2000 no total) — cobre
+    confortavelmente até ~60 pools * 31 dias, a faixa que este app usa
+    (SEARCH_LIMIT do frontend é 50).
+    """
+    if not pool_ids:
+        return {}
+
+    since = int(time.time()) - (days + 1) * 86400
+    grouped: dict[str, list[tuple[int, float, float]]] = {pid: [] for pid in pool_ids}
+    skip = 0
+    page_size = 1000
+    for _ in range(2):
+        data = await graph_client.run_query(
+            _BATCH_DAY_DATA_QUERY,
+            {"poolIds": pool_ids, "since": since, "first": page_size, "skip": skip},
+        )
+        rows = data["poolDayDatas"]
+        for row in rows:
+            pool_id = row["pool"]["id"]
+            grouped.setdefault(pool_id, []).append((int(row["date"]), float(row["volumeUSD"]), float(row["feesUSD"])))
+        if len(rows) < page_size:
+            break
+        skip += page_size
+    return grouped
+
+
+def _aggregate_pool_stats(
+    day_rows: list[tuple[int, float, float]], tvl_usd: float
+) -> tuple[float, float, float, float]:
+    """A partir das linhas (date, volumeUSD, feesUSD) de um pool, retorna
+    (volume_1d, volume_30d, volume_1d_sobre_tvl, apr_pool_30d)."""
+    if not day_rows:
+        return 0.0, 0.0, 0.0, 0.0
+
+    rows_desc = sorted(day_rows, key=lambda r: r[0], reverse=True)
+    volume_30d = sum(r[1] for r in rows_desc)
+    fees_30d = sum(r[2] for r in rows_desc)
+    volume_1d = rows_desc[0][1]
+    volume_1d_over_tvl = volume_1d / tvl_usd if tvl_usd > 0 else 0.0
+
+    apr_pool_30d = 0.0
+    if tvl_usd > 0:
+        try:
+            apr_pool_30d = indicators.fee_apr_full_range(fees_30d, tvl_usd, period_days=len(rows_desc))
+        except ValueError:
+            apr_pool_30d = 0.0
+
+    return volume_1d, volume_30d, volume_1d_over_tvl, apr_pool_30d
+
+
 async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
     data = await graph_client.run_query(_SEARCH_QUERY, {"search": search, "first": limit})
     raw_pools = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
@@ -130,7 +203,19 @@ async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
         seen.add(raw["id"])
         results.append(_to_pool_summary(raw))
     results.sort(key=lambda p: p.total_value_locked_usd, reverse=True)
-    return results[:limit]
+    results = results[:limit]
+
+    day_data_by_pool = await _fetch_recent_day_data_batch([p.id for p in results])
+    for pool in results:
+        vol_1d, vol_30d, vol_1d_over_tvl, apr_30d = _aggregate_pool_stats(
+            day_data_by_pool.get(pool.id, []), pool.total_value_locked_usd
+        )
+        pool.volume_1d_usd = vol_1d
+        pool.volume_30d_usd = vol_30d
+        pool.volume_1d_over_tvl = vol_1d_over_tvl
+        pool.apr_pool_30d = apr_30d
+
+    return results
 
 
 async def get_pool_detail(pool_id: str) -> PoolDetail | None:

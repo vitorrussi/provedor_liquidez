@@ -15,6 +15,13 @@ class PoolSummary(BaseModel):
     fee_tier: int
     total_value_locked_usd: float
     volume_usd: float
+    # Agregados dos últimos ~30 dias (poolDayData). 0 quando o pool não tem
+    # dados nesse período (pool novo/inativo) -- ver docstring de
+    # services/pools.py sobre como são calculados em lote.
+    volume_1d_usd: float = 0.0
+    volume_30d_usd: float = 0.0
+    volume_1d_over_tvl: float = 0.0
+    apr_pool_30d: float = 0.0
 
 
 class PoolDetail(PoolSummary):

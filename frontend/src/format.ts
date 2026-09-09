@@ -8,6 +8,11 @@ export function formatPercent(value: number, digits = 2): string {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
+export function formatRatio(value: number): string {
+  if (value < 0.01 && value > 0) return '<0,01';
+  return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export function formatPrice(value: number): string {
   if (value === 0) return '0';
   if (Math.abs(value) < 0.0001) return value.toExponential(2);
