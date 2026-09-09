@@ -88,3 +88,12 @@ class GraphUsageResponse(BaseModel):
     used: int
     limit: int
     remaining: int
+
+
+class GraphRequestLogEntry(BaseModel):
+    timestamp: str
+    operation: str
+    variables: dict
+    status: str
+    duration_ms: float
+    error: str | None = None

@@ -1,9 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import request_log
 from .config import get_settings
 from .routers import indicators, pools
-from .schemas import GraphUsageResponse
+from .schemas import GraphRequestLogEntry, GraphUsageResponse
 from .usage_tracker import get_usage
 
 app = FastAPI(title="Provedor de Liquidez API", version="0.1.0")
@@ -29,3 +30,19 @@ def health():
 def graph_usage():
     stats = get_usage()
     return GraphUsageResponse(month=stats.month, used=stats.used, limit=stats.limit, remaining=stats.remaining)
+
+
+@app.get("/api/graph-usage/log", response_model=list[GraphRequestLogEntry])
+def graph_usage_log(limit: int = Query(50, ge=1, le=500)):
+    entries = request_log.read_recent(limit)
+    return [
+        GraphRequestLogEntry(
+            timestamp=e.timestamp,
+            operation=e.operation,
+            variables=e.variables,
+            status=e.status,
+            duration_ms=e.duration_ms,
+            error=e.error,
+        )
+        for e in entries
+    ]
