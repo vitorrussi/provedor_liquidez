@@ -7,12 +7,14 @@ interface Props {
   onSelect: (pool: PoolSummary) => void;
 }
 
-type SortKey = 'tvl' | 'volume' | 'fee';
+type SortKey = 'pair' | 'fee' | 'tvl' | 'volume';
+type SortDirection = 'asc' | 'desc';
 
-const SORT_LABELS: Record<SortKey, string> = {
-  tvl: 'TVL',
-  volume: 'Volume (total)',
-  fee: 'Taxa',
+const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
+  pair: 'asc',
+  fee: 'asc',
+  tvl: 'desc',
+  volume: 'desc',
 };
 
 export function PoolSearch({ onSelect }: Props) {
@@ -22,7 +24,17 @@ export function PoolSearch({ onSelect }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('tvl');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [hideZeroVolume, setHideZeroVolume] = useState(false);
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDirection(DEFAULT_DIRECTION[key]);
+    }
+  }
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -45,13 +57,23 @@ export function PoolSearch({ onSelect }: Props) {
   const sortedResults = useMemo(() => {
     const visible = hideZeroVolume ? results.filter((p) => p.volume_usd > 0) : results;
     const sorted = [...visible];
+    const sign = sortDirection === 'asc' ? 1 : -1;
     sorted.sort((a, b) => {
-      if (sortKey === 'tvl') return b.total_value_locked_usd - a.total_value_locked_usd;
-      if (sortKey === 'volume') return b.volume_usd - a.volume_usd;
-      return a.fee_tier - b.fee_tier;
+      switch (sortKey) {
+        case 'tvl':
+          return sign * (a.total_value_locked_usd - b.total_value_locked_usd);
+        case 'volume':
+          return sign * (a.volume_usd - b.volume_usd);
+        case 'fee':
+          return sign * (a.fee_tier - b.fee_tier);
+        case 'pair':
+          return sign * `${a.token0.symbol}/${a.token1.symbol}`.localeCompare(`${b.token0.symbol}/${b.token1.symbol}`);
+        default:
+          return 0;
+      }
     });
     return sorted;
-  }, [results, sortKey, hideZeroVolume]);
+  }, [results, sortKey, sortDirection, hideZeroVolume]);
 
   return (
     <div className="pool-search">
@@ -84,21 +106,8 @@ export function PoolSearch({ onSelect }: Props) {
             Uniswap não mistura eles.
           </p>
 
-          <div className="pool-list__controls">
-            <div className="pool-list__sort">
-              <span className="muted">Ordenar por:</span>
-              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`sort-btn ${sortKey === key ? 'sort-btn--active' : ''}`}
-                  onClick={() => setSortKey(key)}
-                >
-                  {SORT_LABELS[key]}
-                </button>
-              ))}
-            </div>
-            {zeroVolumeCount > 0 && (
+          {zeroVolumeCount > 0 && (
+            <div className="pool-list__controls">
               <label className="pool-list__toggle">
                 <input
                   type="checkbox"
@@ -107,20 +116,45 @@ export function PoolSearch({ onSelect }: Props) {
                 />
                 Ocultar sem volume histórico ({zeroVolumeCount})
               </label>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="pool-list__header">
-            <span className="pool-list__pair">Pool</span>
-            <span className="pool-list__fee" title="Taxa cobrada em cada troca, dividida entre os LPs">
-              Taxa
-            </span>
-            <span className="pool-list__tvl" title="Valor total travado no pool agora">
-              TVL
-            </span>
-            <span className="pool-list__volume" title="Volume de trocas acumulado desde a criação do pool (não é 24h)">
-              Volume (total)
-            </span>
+            <SortableHeader
+              className="pool-list__pair"
+              label="Pool"
+              sortKey="pair"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+            />
+            <SortableHeader
+              className="pool-list__fee"
+              label="Taxa"
+              title="Taxa cobrada em cada troca, dividida entre os LPs"
+              sortKey="fee"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+            />
+            <SortableHeader
+              className="pool-list__tvl"
+              label="TVL"
+              title="Valor total travado no pool agora"
+              sortKey="tvl"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+            />
+            <SortableHeader
+              className="pool-list__volume"
+              label="Volume (total)"
+              title="Volume de trocas acumulado desde a criação do pool (não é 24h)"
+              sortKey="volume"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+            />
           </div>
 
           <ul className="pool-list">
@@ -149,5 +183,30 @@ export function PoolSearch({ onSelect }: Props) {
         </>
       )}
     </div>
+  );
+}
+
+interface SortableHeaderProps {
+  className: string;
+  label: string;
+  title?: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}
+
+function SortableHeader({ className, label, title, sortKey, activeKey, direction, onSort }: SortableHeaderProps) {
+  const active = sortKey === activeKey;
+  return (
+    <button
+      type="button"
+      className={`pool-list__header-btn ${className} ${active ? 'pool-list__header-btn--active' : ''}`}
+      title={title}
+      onClick={() => onSort(sortKey)}
+    >
+      {label}
+      <span className="pool-list__sort-arrow">{active ? (direction === 'asc' ? '▲' : '▼') : ''}</span>
+    </button>
   );
 }

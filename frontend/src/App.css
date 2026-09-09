@@ -136,28 +136,6 @@ body {
   margin-bottom: 10px;
 }
 
-.pool-list__sort {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-}
-
-.sort-btn {
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.sort-btn--active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .pool-list__toggle {
   display: flex;
   align-items: center;
@@ -187,6 +165,37 @@ body {
 .pool-list__header .pool-list__tvl,
 .pool-list__header .pool-list__volume {
   text-align: right;
+  justify-content: flex-end;
+}
+
+.pool-list__header-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.pool-list__header-btn:hover {
+  color: var(--text);
+}
+
+.pool-list__header-btn--active {
+  color: var(--accent);
+}
+
+.pool-list__sort-arrow {
+  font-size: 0.6rem;
+  width: 0.7em;
+  display: inline-block;
 }
 
 .pool-list {
