@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/pools", tags=["pools"])
 
 
 @router.get("/search", response_model=list[PoolSummary])
-async def search_pools(q: str = Query(..., min_length=1), limit: int = Query(15, ge=1, le=50)):
+async def search_pools(q: str = Query(..., min_length=1), limit: int = Query(50, ge=1, le=50)):
     try:
         return await pools_service.search_pools(q, limit)
     except GraphQueryError as exc:

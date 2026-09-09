@@ -35,7 +35,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  searchPools: (q: string, limit = 15) =>
+  searchPools: (q: string, limit = 50) =>
     request<PoolSummary[]>(`/api/pools/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 
   getPool: (poolId: string) => request<PoolDetail>(`/api/pools/${poolId}`),

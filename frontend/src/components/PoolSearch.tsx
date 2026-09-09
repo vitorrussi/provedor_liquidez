@@ -17,6 +17,12 @@ const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
   volume: 'desc',
 };
 
+// Teto de resultados por busca -- cada busca é 1 chamada ao gateway do Graph
+// independente desse número, mas um valor muito alto deixaria a lista longa
+// demais. Se bater nesse número, pode ter mais pools que não estão sendo
+// mostrados (ver aviso abaixo da lista).
+const SEARCH_LIMIT = 50;
+
 export function PoolSearch({ onSelect }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PoolSummary[]>([]);
@@ -42,7 +48,7 @@ export function PoolSearch({ onSelect }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const pools = await api.searchPools(query.trim());
+      const pools = await api.searchPools(query.trim(), SEARCH_LIMIT);
       setResults(pools);
       setSearched(true);
     } catch (err) {
@@ -180,6 +186,13 @@ export function PoolSearch({ onSelect }: Props) {
               );
             })}
           </ul>
+
+          {results.length === SEARCH_LIMIT && (
+            <p className="footnote">
+              Mostrando os {SEARCH_LIMIT} pools de maior TVL que combinam com "{query}" — pode haver mais que não
+              estão sendo exibidos.
+            </p>
+          )}
         </>
       )}
     </div>
