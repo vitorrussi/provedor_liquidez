@@ -162,6 +162,25 @@ estado depois se antes estivesse parado):
 Para o resto (a grande maioria dos casos: editar rotas, componentes React, `indicators.py`, CSS),
 o hot reload do uvicorn e o HMR do Vite já pegam a mudança sozinhos — não precisa fazer nada.
 
+## Preferência do usuário: commitar ao terminar uma feature/fix
+
+**Neste projeto, ao terminar de implementar uma feature, corrigir um bug, ou qualquer unidade de
+trabalho coerente (testada e funcionando), crie um commit git sem esperar o usuário pedir
+explicitamente.** Isso substitui, só neste repositório, a regra padrão de só commitar quando pedido.
+
+- Rode `git status`/`git diff` antes de commitar pra revisar o que está sendo incluído (igual você
+  já faria pra qualquer commit) — não adicione arquivos que pareçam não relacionados ao trabalho
+  feito sem entender por quê estão lá.
+- Uma unidade de trabalho = um commit. Se o pedido do usuário naturalmente virou vários pedaços
+  independentes (ex: uma correção de bug + uma feature nova depois, em sequência), prefira vários
+  commits pequenos a um só gigante — mensagens de commit continuam curtas e no estilo do histórico
+  existente (`git log --oneline` pra referência), focadas no "porquê", não numa lista de arquivos.
+- Isso não muda as regras de segurança de git de sempre: nunca `push` sem o usuário pedir
+  explicitamente, nunca `--force`/`--no-verify`/`--amend` sem pedido explícito, nunca commitar
+  segredos (`.env`, credenciais) mesmo que peçam.
+- Se o trabalho ficou pela metade, quebrado, ou não testado, não commite só por commitar — espere
+  terminar essa unidade de trabalho primeiro.
+
 ## Rodando localmente
 
 ```bash
