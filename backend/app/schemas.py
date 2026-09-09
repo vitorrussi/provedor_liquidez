@@ -10,6 +10,7 @@ class Token(BaseModel):
 
 class PoolSummary(BaseModel):
     id: str
+    protocol: str = "v3"  # "v2" | "v3" | "v4"
     token0: Token
     token1: Token
     fee_tier: int
@@ -19,8 +20,10 @@ class PoolSummary(BaseModel):
     # dados nesse período (pool novo/inativo) -- ver docstring de
     # services/pools.py sobre como são calculados em lote.
     volume_1d_usd: float = 0.0
+    volume_7d_usd: float = 0.0
     volume_30d_usd: float = 0.0
     volume_1d_over_tvl: float = 0.0
+    apr_pool_7d: float = 0.0
     apr_pool_30d: float = 0.0
 
 
@@ -30,6 +33,13 @@ class PoolDetail(PoolSummary):
     token1_price: float
     fees_usd_lifetime: float
     tx_count: int
+    created_at: int | None = None  # unix timestamp de criação do pool/pair
+    # Se True, total_value_locked_usd foi recalculado a partir do saldo real
+    # on-chain dos tokens (balanceOf do contrato do pool) em vez do campo
+    # totalValueLockedUSD do subgraph, que pode divergir do real -- ver
+    # onchain_client.py e CLAUDE.md. Se False, a chamada on-chain falhou (RPC
+    # fora do ar, timeout etc.) e o valor é o do subgraph mesmo, sem garantia.
+    tvl_verified_onchain: bool = False
 
 
 class DayDataPoint(BaseModel):
@@ -86,8 +96,12 @@ class RangeSimulationResponse(BaseModel):
 
 class PoolIndicatorsResponse(BaseModel):
     pool: PoolDetail
+    fee_apr_full_range_7d: float
     fee_apr_full_range_30d: float
+    annualized_volatility_7d: float
     annualized_volatility_30d: float
+    volume_7d_usd: float
+    volume_30d_usd: float
 
 
 class GraphUsageResponse(BaseModel):

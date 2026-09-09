@@ -1,11 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import type { PoolSummary } from '../api/types';
-import { formatFeeTier, formatPercent, formatRatio, formatUsd } from '../format';
-
-interface Props {
-  onSelect: (pool: PoolSummary) => void;
-}
+import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
 
 type SortKey = 'pair' | 'tvl' | 'vol1d' | 'vol30d' | 'vol1dTvl' | 'apr' | 'volume';
 type SortDirection = 'asc' | 'desc';
@@ -26,8 +23,15 @@ const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
 // nesse número, pode ter mais pools que não estão sendo mostrados.
 const SEARCH_LIMIT = 50;
 
-export function PoolSearch({ onSelect }: Props) {
-  const [query, setQuery] = useState('');
+export function PoolSearch() {
+  const navigate = useNavigate();
+  // O termo buscado fica na URL (?q=...) pra sobreviver ao botão voltar do
+  // navegador quando se abre um pool e volta -- sem isso, voltar da página do
+  // pool perderia os resultados e obrigaria a buscar de novo.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get('q') ?? '';
+
+  const [query, setQuery] = useState(urlQuery);
   const [results, setResults] = useState<PoolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +39,34 @@ export function PoolSearch({ onSelect }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('tvl');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [hideZeroVolume, setHideZeroVolume] = useState(false);
+
+  useEffect(() => {
+    setQuery(urlQuery);
+    if (!urlQuery.trim()) {
+      setResults([]);
+      setSearched(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api
+      .searchPools(urlQuery.trim(), SEARCH_LIMIT)
+      .then((pools) => {
+        if (cancelled) return;
+        setResults(pools);
+        setSearched(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Falha ao buscar pools');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [urlQuery]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -45,20 +77,14 @@ export function PoolSearch({ onSelect }: Props) {
     }
   }
 
-  async function handleSearch(e: React.FormEvent) {
+  function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const pools = await api.searchPools(query.trim(), SEARCH_LIMIT);
-      setResults(pools);
-      setSearched(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Falha ao buscar pools');
-    } finally {
-      setLoading(false);
-    }
+    setSearchParams({ q: query.trim() });
+  }
+
+  function handleSelect(pool: PoolSummary) {
+    navigate(`/pool/${encodeURIComponent(pool.id)}`);
   }
 
   const zeroVolumeCount = useMemo(() => results.filter((p) => p.volume_usd === 0).length, [results]);
@@ -114,12 +140,16 @@ export function PoolSearch({ onSelect }: Props) {
       {results.length > 0 && (
         <>
           <p className="footnote pool-search__hint">
-            Todos os pools são da Uniswap v3 (única fonte deste app). A busca casa qualquer token cujo
-            símbolo ou nome contenha o termo. O mesmo par pode aparecer mais de uma vez: cada taxa
-            (0,01% / 0,05% / 0,30% / 1%) é um pool com contrato e liquidez próprios. "Vol. 30 dias" e
-            "APR da pool" são estimados a partir dos últimos ~30 dias de histórico — a Uniswap não
-            expõe separadamente quanto da taxa vai para o LP e quanto vai para o protocolo, então o
-            que vemos é sempre a taxa total (feeTier).
+            Busca em Uniswap v2, v3 e v4. A busca casa qualquer token cujo símbolo ou nome contenha o
+            termo. O mesmo par pode aparecer mais de uma vez: em v3/v4 cada taxa (0,01% / 0,05% / 0,30%
+            / 1%) é um pool com contrato e liquidez próprios; em v2 a taxa é sempre fixa em 0,30% (não
+            existe conceito de faixa de taxa nem de liquidez concentrada). "Vol. 30 dias" e "APR da
+            pool" são estimados a partir dos últimos ~30 dias de histórico — a Uniswap não expõe
+            separadamente quanto da taxa vai para o LP e quanto vai para o protocolo, então o que vemos
+            é sempre a taxa total. Para v2, como o subgraph não indexa taxas separadamente, elas são
+            estimadas como 0,30% do volume diário. Ao abrir um pool v2, a página mostra uma versão
+            simplificada (sem simulador de faixa e sem gráfico de preço, já que v2 não tem liquidez
+            concentrada nem histórico OHLC indexado).
           </p>
 
           {zeroVolumeCount > 0 && (
@@ -206,7 +236,7 @@ export function PoolSearch({ onSelect }: Props) {
               {sortedResults.map((pool, index) => {
                 const noVolume = pool.volume_usd === 0;
                 return (
-                  <li key={pool.id} className="pool-list__item" onClick={() => onSelect(pool)}>
+                  <li key={pool.id} className="pool-list__item" onClick={() => handleSelect(pool)}>
                     <span className="pool-list__rank muted">{index + 1}</span>
                     <span className="pool-list__pair">
                       <span className="pool-list__pair-main">
@@ -220,7 +250,10 @@ export function PoolSearch({ onSelect }: Props) {
                           </span>
                         )}
                       </span>
-                      <span className="pool-list__pair-sub muted">Uniswap v3 · {formatFeeTier(pool.fee_tier)}</span>
+                      <span className="pool-list__pair-sub muted">
+                        {protocolLabel(pool.protocol)} · {formatFeeTier(pool.fee_tier)}
+                        {pool.protocol === 'v2' && ' (fixa)'}
+                      </span>
                     </span>
                     <span className="pool-list__col">{formatUsd(pool.total_value_locked_usd)}</span>
                     <span className="pool-list__col">{formatUsd(pool.volume_1d_usd)}</span>

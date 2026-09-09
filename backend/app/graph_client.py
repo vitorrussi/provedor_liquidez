@@ -20,7 +20,9 @@ class GraphQueryError(RuntimeError):
         self.errors = errors or []
 
 
-async def run_query(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+async def run_query(
+    query: str, variables: dict[str, Any] | None = None, protocol: str = "v3", timeout: float = 20.0
+) -> dict[str, Any]:
     settings = get_settings()
     if not settings.graph_api_key:
         raise GraphQueryError(
@@ -30,9 +32,9 @@ async def run_query(query: str, variables: dict[str, Any] | None = None) -> dict
 
     start = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
-                settings.graph_gateway_url,
+                settings.graph_gateway_url(protocol),
                 json={"query": query, "variables": variables or {}},
             )
             usage_tracker.record_request()

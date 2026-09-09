@@ -43,6 +43,14 @@ async def get_hourly_history(pool_id: str, hours: int = Query(168, ge=1, le=744)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/{pool_id}/related", response_model=list[PoolSummary])
+async def get_related_pools(pool_id: str):
+    try:
+        return await pools_service.get_related_pools(pool_id)
+    except GraphQueryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/{pool_id}/indicators", response_model=PoolIndicatorsResponse)
 async def get_pool_indicators(pool_id: str):
     try:
@@ -56,11 +64,23 @@ async def get_pool_indicators(pool_id: str):
     if len(daily) < 2:
         raise HTTPException(status_code=422, detail="Histórico insuficiente para calcular indicadores")
 
+    # daily vem em ordem cronológica ascendente (ver get_pool_day_data) -- os
+    # últimos 7 elementos são os 7 dias mais recentes.
+    daily_7d = daily[-7:]
+
     try:
         fees_30d = sum(d.fees_usd for d in daily)
-        fee_apr = indicators.fee_apr_full_range(fees_30d, pool.total_value_locked_usd, period_days=len(daily))
-        closes = [d.close for d in daily]
-        vol = indicators.annualized_volatility(closes)
+        fee_apr_30d = indicators.fee_apr_full_range(fees_30d, pool.total_value_locked_usd, period_days=len(daily))
+        closes_30d = [d.close for d in daily]
+        vol_30d = indicators.annualized_volatility(closes_30d)
+
+        fees_7d = sum(d.fees_usd for d in daily_7d)
+        fee_apr_7d = indicators.fee_apr_full_range(fees_7d, pool.total_value_locked_usd, period_days=len(daily_7d))
+        closes_7d = [d.close for d in daily_7d]
+        # Volatilidade de 7d precisa de pelo menos 2 preços -- pools com
+        # histórico curto (<8 dias) ainda calculam a de 30d normalmente, só
+        # a de 7d fica indisponível (0.0, o frontend trata como "sem dado").
+        vol_7d = indicators.annualized_volatility(closes_7d) if len(closes_7d) >= 2 else 0.0
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -70,4 +90,12 @@ async def get_pool_indicators(pool_id: str):
             ),
         ) from exc
 
-    return PoolIndicatorsResponse(pool=pool, fee_apr_full_range_30d=fee_apr, annualized_volatility_30d=vol)
+    return PoolIndicatorsResponse(
+        pool=pool,
+        fee_apr_full_range_7d=fee_apr_7d,
+        fee_apr_full_range_30d=fee_apr_30d,
+        annualized_volatility_7d=vol_7d,
+        annualized_volatility_30d=vol_30d,
+        volume_7d_usd=sum(d.volume_usd for d in daily_7d),
+        volume_30d_usd=sum(d.volume_usd for d in daily),
+    )

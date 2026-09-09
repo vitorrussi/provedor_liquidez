@@ -43,6 +43,13 @@ body {
   max-width: 960px;
   margin: 0 auto;
   padding: 24px 16px 64px;
+  transition: max-width 0.15s ease;
+}
+
+/* Página de detalhe do pool tem mais estatísticas por linha (stat-grid) e
+   dois cards lado a lado (IL + simulador de faixa) -- usa mais largura. */
+.app--wide {
+  max-width: 1280px;
 }
 
 .app__header {
@@ -52,6 +59,15 @@ body {
 .app__header h1 {
   margin: 0 0 4px;
   font-size: 1.75rem;
+}
+
+.app__home-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app__home-link:hover h1 {
+  color: var(--accent);
 }
 
 .app__footer {
@@ -286,6 +302,20 @@ body {
   cursor: not-allowed;
 }
 
+/* Página do pool */
+
+.pool-page__back {
+  display: inline-block;
+  margin-bottom: 16px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.pool-page__back:hover {
+  color: var(--accent);
+}
+
 /* Dashboard / cards */
 
 .dashboard {
@@ -299,6 +329,10 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+}
+
+.dashboard__row--single {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 760px) {
@@ -324,6 +358,101 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.overview__section-header {
+  margin: 20px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.overview__section-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+/* Faixa de preço 30d */
+
+.price-range-bar {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.price-range-bar__caption {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.price-range-bar__track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--border), var(--accent), var(--border));
+  opacity: 0.55;
+}
+
+.price-range-bar__marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.price-range-bar__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Pools relacionadas */
+
+.related-pools {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.related-pools__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.related-pools__item + .related-pools__item {
+  margin-top: 6px;
+}
+
+.related-pools__item:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.related-pools__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.related-pools__stat {
+  font-size: 0.85rem;
+  color: var(--text);
 }
 
 .badge {
@@ -352,6 +481,12 @@ body {
 
 .stat-grid--compact {
   margin-top: 16px;
+}
+
+@media (min-width: 900px) {
+  .app--wide .stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 @media (max-width: 600px) {

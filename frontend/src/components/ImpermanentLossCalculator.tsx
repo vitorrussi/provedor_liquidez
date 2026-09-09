@@ -8,6 +8,7 @@ interface Props {
 }
 
 export function ImpermanentLossCalculator({ pool }: Props) {
+  const isV2 = pool.protocol === 'v2';
   const currentPrice = pool.token0_price;
   const [entryPrice, setEntryPrice] = useState(currentPrice);
   const [priceLower, setPriceLower] = useState(currentPrice * 0.8);
@@ -22,11 +23,15 @@ export function ImpermanentLossCalculator({ pool }: Props) {
     setLoading(true);
     setError(null);
     try {
+      // v2 não tem faixa (é sempre full-range) -- manda uma faixa larga
+      // qualquer só pra satisfazer a validação do endpoint; o resultado
+      // exibido para v2 usa impermanent_loss_full_range_equivalent, que
+      // independe de price_lower/price_upper (é o IL clássico da v2).
       const res = await api.computeImpermanentLoss({
         entry_price: entryPrice,
         current_price: projectedPrice,
-        price_lower: priceLower,
-        price_upper: priceUpper,
+        price_lower: isV2 ? entryPrice * 0.5 : priceLower,
+        price_upper: isV2 ? entryPrice * 2 : priceUpper,
       });
       setResult(res);
     } catch (err) {
@@ -64,24 +69,28 @@ export function ImpermanentLossCalculator({ pool }: Props) {
             onChange={(e) => setProjectedPrice(Number(e.target.value))}
           />
         </label>
-        <label>
-          Faixa mínima
-          <input
-            type="number"
-            step="any"
-            value={priceLower}
-            onChange={(e) => setPriceLower(Number(e.target.value))}
-          />
-        </label>
-        <label>
-          Faixa máxima
-          <input
-            type="number"
-            step="any"
-            value={priceUpper}
-            onChange={(e) => setPriceUpper(Number(e.target.value))}
-          />
-        </label>
+        {!isV2 && (
+          <>
+            <label>
+              Faixa mínima
+              <input
+                type="number"
+                step="any"
+                value={priceLower}
+                onChange={(e) => setPriceLower(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Faixa máxima
+              <input
+                type="number"
+                step="any"
+                value={priceUpper}
+                onChange={(e) => setPriceUpper(Number(e.target.value))}
+              />
+            </label>
+          </>
+        )}
         <button type="submit" disabled={loading} className="btn btn--primary form-grid__submit">
           {loading ? 'Calculando...' : 'Calcular IL'}
         </button>
@@ -89,7 +98,19 @@ export function ImpermanentLossCalculator({ pool }: Props) {
 
       {error && <p className="error-text">{error}</p>}
 
-      {result && (
+      {result && isV2 && (
+        <div className="stat-grid stat-grid--compact">
+          <div className="stat stat--wide">
+            <span className="stat__label">Impermanent Loss (full-range)</span>
+            <span
+              className={`stat__value ${result.impermanent_loss_full_range_equivalent < 0 ? 'stat__value--negative' : ''}`}
+            >
+              {formatPercent(result.impermanent_loss_full_range_equivalent)}
+            </span>
+          </div>
+        </div>
+      )}
+      {result && !isV2 && (
         <div className="stat-grid stat-grid--compact">
           <div className="stat">
             <span className="stat__label">IL na faixa escolhida</span>
@@ -108,8 +129,9 @@ export function ImpermanentLossCalculator({ pool }: Props) {
         </div>
       )}
       <p className="footnote">
-        Faixas mais estreitas concentram capital (mais taxas enquanto o preço está dentro), mas também
-        ampliam o IL quando o preço se move — compare sempre com as taxas estimadas no simulador de faixa.
+        {isV2
+          ? 'Posições em Uniswap v2 são sempre full-range — não há faixa para escolher, o IL acima é o clássico 2·√r/(1+r) - 1.'
+          : 'Faixas mais estreitas concentram capital (mais taxas enquanto o preço está dentro), mas também ampliam o IL quando o preço se move — compare sempre com as taxas estimadas no simulador de faixa.'}
       </p>
     </div>
   );

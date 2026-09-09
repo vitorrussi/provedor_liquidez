@@ -6,10 +6,96 @@ sobre como mexer no código sem se machucar.
 
 ## O que é
 
-Ferramenta de apoio a decisão para provedores de liquidez na Uniswap v3: calcula Impermanent Loss,
-APR de taxas, volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço
-de um pool. Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm do subgraph
-oficial da Uniswap v3 via gateway do The Graph.
+Ferramenta de apoio a decisão para provedores de liquidez na Uniswap: calcula Impermanent Loss, APR
+de taxas, volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço de
+um pool. Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm dos subgraphs
+oficiais da Uniswap v2, v3 e v4 via gateway do The Graph (um subgraph por versão/protocolo).
+
+## TVL do subgraph pode estar errado -- por que existe verificação on-chain
+
+O campo `totalValueLockedUSD`/`reserveUSD` do subgraph comunitário da Uniswap é calculado por
+tracking incremental (soma/subtrai a cada mint/burn/collect) e **não resincroniza com o saldo real**
+do contrato -- em pools com histórico de posições complexo isso diverge, às vezes muito (achado real:
+pool `0xCBCdF9626bC03E24f779434178A73a0B4bad62eD`, WBTC/WETH 0,30%, subgraph reportava **$204M**,
+saldo real (e o app oficial da Uniswap) mostravam **~$42M** -- quase 5x de diferença. Confirmei que
+não era erro de preço: o `derivedETH` do WBTC bateu com um pool de referência independente
+(WBTC/USDC), e o TVL do subgraph era matematicamente consistente com seus próprios
+`totalValueLockedToken0`/`Token1` errados -- ou seja, o saldo rastreado é que está errado, não a
+conta.
+
+Por isso `get_pool_detail` (`services/pools.py`) faz uma verificação on-chain de verdade: dois
+`eth_call` de `ERC20.balanceOf(endereço_do_pool)` via `onchain_client.py` (JSON-RPC cru, sem
+web3.py, contra um RPC público sem API key -- `config.eth_rpc_url`), multiplicados pelo mesmo preço
+que o subgraph usaria (`derivedETH * ethPriceUSD`, que se mostrou confiável). Se as duas chamadas
+funcionarem, `PoolDetail.total_value_locked_usd` é sobrescrito com esse valor e
+`tvl_verified_onchain=True`; se o RPC falhar (timeout, fora do ar), cai pro valor do subgraph mesmo,
+com `tvl_verified_onchain=False` (o frontend mostra um badge diferenciando os dois casos, ver
+`PoolOverview.tsx`). Como isso melhora o TVL usado em `total_value_locked_usd`, o APR calculado a
+partir dele (`fee_apr_full_range`) também fica mais preciso -- não só o número exibido.
+
+**Essa verificação só roda no detalhe do pool** (`get_pool_detail`), não na busca/lista nem em
+`get_related_pools` -- fazer isso pra até 50+ pools de uma busca seria lento demais e martelaria o
+RPC público. A lista continua ordenada/exibida com o TVL do subgraph (documentado como aproximação
+em `pool-search__hint`); só quando você abre um pool específico é que o número é conferido de
+verdade. v2 usa o mesmo mecanismo (`bundle.ethPrice`, sem "USD" no nome -- diferente de v3/v4 que
+usam `bundle.ethPriceUSD`, confirmado por introspecção).
+
+Se o RPC público (`ethereum-rpc.publicnode.com`) ficar instável, troque `ETH_RPC_URL` no `.env` por
+um endpoint próprio (Infura/Alchemy free tier já bastam, é só 2 `eth_call` por carregamento de pool).
+
+## Multi-protocolo: v2, v3 e v4
+
+v3 e v4 têm schema de subgraph praticamente idêntico (mesma entidade `Pool`/`PoolDayData`, mesma
+matemática de liquidez concentrada) — são tratados pelo mesmo código em `services/pools.py`,
+parametrizado por `protocol` (só muda qual subgraph é consultado, ver `config.Settings.graph_gateway_url`
+e `graph_client.run_query(..., protocol=...)`). v2 é um AMM de produto constante clássico (entidade
+`Pair`/`PairDayData`, sem `feeTier`/tick/liquidez concentrada, taxa sempre fixa em 0,30%, sem
+`feesUSD` indexado — estimado como `volumeUSD * 0.003`) e tem queries GraphQL próprias
+(`_SEARCH_QUERY_V2`, `_BATCH_DAY_DATA_QUERY_V2`, `_POOL_DETAIL_QUERY_V2`).
+
+IDs de pool expostos ao frontend levam um prefixo de protocolo, ex: `v2:0xabc...`, `v4:0xabc...`
+(`_to_pool_summary`/`_split_pool_id` em `services/pools.py`) — sem isso não dá pra saber em qual dos
+três subgraphs buscar o detalhe de um pool a partir só do endereço. `client.ts` faz
+`encodeURIComponent` do id antes de montar a URL por causa do `:`.
+
+v2 não tem histórico OHLC indexado (`PairDayData` só tem reservas/volume, sem open/high/low/close) e
+não tem liquidez concentrada — por isso um pool v2 mostra uma versão simplificada no frontend: sem
+`PriceChart`, sem `RangeSimulator`, e a `ImpermanentLossCalculator` esconde os inputs de faixa
+(price_lower/price_upper) e usa só o IL clássico full-range (`impermanent_loss_v2` em
+`indicators.py`, já existia antes desse recurso). `get_pool_day_data`/`get_pool_hour_data` lançam
+`GraphQueryError` se chamados com um pool v2 — não deveria acontecer, já que o frontend não oferece
+essas telas para v2, mas é o comportamento se algo chamar na mão.
+
+O subgraph v4 foi observado respondendo em >20s pra termos de busca comuns (ex: "WETH") — bem mais
+lento que v3. Por isso `search_pools()` isola cada protocolo com `asyncio.gather(..., return_exceptions=True)`
+e usa um timeout mais curto (`_SEARCH_TIMEOUT = 10.0`) só pras buscas: se um protocolo falhar ou
+estourar o timeout, os outros dois ainda aparecem em vez de derrubar a busca inteira. Isso é
+intencional, não um bug — se notar resultados de v4 faltando ocasionalmente numa busca por termo
+muito comum, é essa degradação graciosa agindo, não um erro silencioso.
+
+## Indicadores 7d/30d, pools relacionadas e o sentinel de taxa dinâmica da v4
+
+`PoolSummary`/`PoolDetail` carregam `volume_7d_usd`/`apr_pool_7d` além dos de 30d (mesma
+`_aggregate_pool_stats`, que agora retorna um `PoolDayStats` com as duas janelas). Para v3/v4, o
+endpoint `/api/pools/{id}/indicators` também calcula `fee_apr_full_range_7d`/`annualized_volatility_7d`
+reaproveitando o mesmo `daily` (últimos 30 dias) já buscado — sem chamada extra ao gateway.
+
+`GET /api/pools/{id}/related` (`services/pools.py::get_related_pools`) busca outras pools/pairs do
+mesmo par de tokens nos três protocolos (outras fee tiers em v3/v4, ou a versão v2/v3/v4 do mesmo
+par), filtrando TVL < $1k (dust/pools esquecidas — o APR calculado sobre um TVL desprezível vira um
+número sem sentido, tipo >1000000%) e limitando a 6 resultados por TVL. Usa `token0: $addr`/`token1:
+$addr` (endereço direto, não a busca por símbolo de `_SEARCH_QUERY`) — a ordem token0/token1 é
+canônica (endereço menor primeiro) em todo deployment Uniswap, então não precisa inverter.
+
+**v4 tem um valor sentinel pra `feeTier`**: `8388608` (`0x800000`) significa "taxa dinâmica, definida
+por um hook" — não é uma taxa fixa de verdade. `formatFeeTier` (frontend) trata esse caso
+especificamente (mostra "dinâmica" em vez de "838.86%", que é o que dava antes de eu notar isso ao
+testar `/related` com dados reais). Se for adicionar mais lugares que mostram `fee_tier` cru, lembre
+desse sentinel.
+
+`formatPercent` também tem um teto (`>10000%` / `<-10000%`) pro mesmo motivo do filtro de TVL acima —
+sem ele, um pool com TVL de poucos dólares e algum volume registrado produz um "APR" de milhares de
+por cento, tecnicamente correto pela conta mas sem nenhum valor informativo.
 
 ## Preferência do usuário: não derrubar o servidor de dev à toa
 
@@ -112,5 +198,26 @@ backend/app/
 frontend/src/
   api/client.ts         # wrapper fetch tipado pro backend
   components/           # um componente por seção do dashboard
+  pages/PoolPage.tsx    # página de detalhe do pool (rota /pool/:id)
   format.ts              # helpers de formatação (USD, %, preço, data)
 ```
+
+## Navegação (react-router-dom)
+
+Duas rotas, definidas em `App.tsx` (que também é o layout compartilhado — header/footer/`UsageBadge`
+ficam fora do `<Routes>`): `/` é a busca (`components/PoolSearch.tsx`, que já é a "página" — não tem
+um `SearchPage.tsx` separado) e `/pool/:id` é o detalhe (`pages/PoolPage.tsx`). O `id` da rota é o id
+prefixado por protocolo (`v3:0xabc...`) vindo de `PoolSummary.id`, sempre passado por
+`encodeURIComponent` ao montar o link/navigate (por causa do `:`) e por `decodeURIComponent` ao ler
+de volta em `useParams()`.
+
+O termo de busca fica sincronizado com a URL (`/?q=termo`, via `useSearchParams` dentro do próprio
+`PoolSearch`) — é assim que o botão voltar do navegador consegue restaurar a lista depois de abrir um
+pool: `PoolSearch` desmonta ao navegar pra `/pool/:id` (perde o estado local), mas ao voltar pra `/`
+o efeito que dispara a busca roda de novo a partir do `q` da URL. Isso custa uma busca nova ao Graph
+a cada "voltar" (aceitável frente ao limite de 100k/mês) — ordenação de coluna e o toggle de "ocultar
+sem volume" não são persistidos na URL, só o termo.
+
+A página de pool usa mais largura que a busca (classe `.app--wide` em `App.css`, aplicada em `App.tsx`
+via `useLocation().pathname.startsWith('/pool/')`) — é por isso que existe mais espaço lá pra
+estatísticas em 4 colunas.

@@ -38,15 +38,18 @@ export const api = {
   searchPools: (q: string, limit = 50) =>
     request<PoolSummary[]>(`/api/pools/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 
-  getPool: (poolId: string) => request<PoolDetail>(`/api/pools/${poolId}`),
+  getPool: (poolId: string) => request<PoolDetail>(`/api/pools/${encodeURIComponent(poolId)}`),
 
-  getPoolIndicators: (poolId: string) => request<PoolIndicatorsResponse>(`/api/pools/${poolId}/indicators`),
+  getPoolIndicators: (poolId: string) =>
+    request<PoolIndicatorsResponse>(`/api/pools/${encodeURIComponent(poolId)}/indicators`),
 
   getDailyHistory: (poolId: string, days = 30) =>
-    request<DayDataPoint[]>(`/api/pools/${poolId}/history/daily?days=${days}`),
+    request<DayDataPoint[]>(`/api/pools/${encodeURIComponent(poolId)}/history/daily?days=${days}`),
 
   getHourlyHistory: (poolId: string, hours = 168) =>
-    request<HourDataPoint[]>(`/api/pools/${poolId}/history/hourly?hours=${hours}`),
+    request<HourDataPoint[]>(`/api/pools/${encodeURIComponent(poolId)}/history/hourly?hours=${hours}`),
+
+  getRelatedPools: (poolId: string) => request<PoolSummary[]>(`/api/pools/${encodeURIComponent(poolId)}/related`),
 
   computeImpermanentLoss: (req: ImpermanentLossRequest) =>
     request<ImpermanentLossResponse>('/api/indicators/impermanent-loss', {

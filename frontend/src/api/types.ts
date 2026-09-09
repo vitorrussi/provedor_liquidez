@@ -5,16 +5,21 @@ export interface Token {
   decimals: number;
 }
 
+export type Protocol = 'v2' | 'v3' | 'v4';
+
 export interface PoolSummary {
   id: string;
+  protocol: Protocol;
   token0: Token;
   token1: Token;
   fee_tier: number;
   total_value_locked_usd: number;
   volume_usd: number;
   volume_1d_usd: number;
+  volume_7d_usd: number;
   volume_30d_usd: number;
   volume_1d_over_tvl: number;
+  apr_pool_7d: number;
   apr_pool_30d: number;
 }
 
@@ -24,6 +29,8 @@ export interface PoolDetail extends PoolSummary {
   token1_price: number;
   fees_usd_lifetime: number;
   tx_count: number;
+  created_at: number | null;
+  tvl_verified_onchain: boolean;
 }
 
 export interface DayDataPoint {
@@ -46,8 +53,12 @@ export interface HourDataPoint {
 
 export interface PoolIndicatorsResponse {
   pool: PoolDetail;
+  fee_apr_full_range_7d: number;
   fee_apr_full_range_30d: number;
+  annualized_volatility_7d: number;
   annualized_volatility_30d: number;
+  volume_7d_usd: number;
+  volume_30d_usd: number;
 }
 
 export interface ImpermanentLossRequest {
