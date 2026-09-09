@@ -90,6 +90,13 @@ a mesma key, e reseta por mês civil, que pode não bater com o ciclo de billing
 de verdade é o dashboard em thegraph.com/studio/apikeys/, que exige carteira conectada e assinatura
 de mensagem (não automatizável por aqui).
 
+Além do contador agregado, `backend/app/request_log.py` grava uma linha JSON por requisição em
+`backend/data/graph_requests.log` (JSONL, gitignored): timestamp, nome da operação (extraído do
+texto da query GraphQL), variáveis, status e duração. Consultar via
+`GET /api/graph-usage/log?limit=N`. Não é retroativo — só registra a partir de quando esse recurso
+foi adicionado, então não precisa bater com o total do contador (que tem um offset histórico
+seedado manualmente).
+
 ## Estrutura
 
 ```
