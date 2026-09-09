@@ -27,6 +27,20 @@ tende a [0, ∞).
 - Uma API key gratuita do The Graph: crie uma conta em https://thegraph.com/studio/ e gere uma key
   em "API Keys" — o free tier cobre uso de desenvolvimento tranquilamente.
 
+## Rodando tudo com um comando
+
+Depois de instalar as dependências (seções abaixo), dá pra subir/derrubar os dois servidores juntos:
+
+```bash
+scripts/dev.sh start     # sobe backend (porta 8000) + frontend (porta 5173) em background
+scripts/dev.sh status
+scripts/dev.sh logs      # tail dos dois logs (Ctrl-C só sai do tail, servidores continuam)
+scripts/dev.sh stop
+scripts/dev.sh restart
+```
+
+Portas customizáveis via env var, se 8000/5173 estiverem ocupadas: `BACKEND_PORT=8787 FRONTEND_PORT=5174 scripts/dev.sh start`.
+
 ## Backend
 
 ```bash
