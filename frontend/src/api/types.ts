@@ -117,6 +117,7 @@ export interface AssetIndexRow {
   category: string | null;
   pools_count: number;
   total_tvl_usd: number;
+  total_volume_usd: number;
   top_pairs: AssetTopPair[];
 }
 

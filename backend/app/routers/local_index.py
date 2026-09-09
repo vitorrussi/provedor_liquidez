@@ -29,6 +29,7 @@ def _asset_to_row(a: local_db.AssetRecord) -> AssetIndexRow:
         category=a.category,
         pools_count=a.pools_count,
         total_tvl_usd=a.total_tvl_usd,
+        total_volume_usd=a.total_volume_usd,
         top_pairs=[AssetTopPair(**p) for p in a.top_pairs],
     )
 
@@ -80,12 +81,16 @@ async def refresh_index(min_tvl_usd: float | None = Query(None, ge=0)):
 async def list_assets(
     q: str | None = None,
     category: str | None = None,
+    exact: bool = False,
+    hide_inactive: bool = False,
     sort: str = "total_tvl_usd",
     order: str = "desc",
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    items, total = await asyncio.to_thread(local_db.query_assets, q, category, sort, order, limit, offset)
+    items, total = await asyncio.to_thread(
+        local_db.query_assets, q, category, exact, hide_inactive, sort, order, limit, offset
+    )
     return AssetIndexResponse(items=[_asset_to_row(a) for a in items], total=total)
 
 
@@ -95,14 +100,25 @@ async def suggest_assets(prefix: str = Query(..., min_length=1), limit: int = Qu
     return [_asset_to_row(a) for a in items]
 
 
+_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome"}
+
+
 @router.get("/pools", response_model=PoolIndexResponse)
 async def list_pools_index(
     q: str | None = None,
+    token_a: str | None = None,
+    token_b: str | None = None,
+    exact: bool = False,
+    hide_inactive: bool = False,
     protocol: str | None = None,
     sort: str = "total_value_locked_usd",
     order: str = "desc",
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    items, total = await asyncio.to_thread(local_db.query_pools, q, protocol, sort, order, limit, offset)
+    if protocol is not None and protocol not in _VALID_PROTOCOLS:
+        raise HTTPException(status_code=400, detail=f"Protocolo inválido: {protocol}")
+    items, total = await asyncio.to_thread(
+        local_db.query_pools, q, token_a, token_b, exact, hide_inactive, protocol, sort, order, limit, offset
+    )
     return PoolIndexResponse(items=[_pool_to_row(p) for p in items], total=total)

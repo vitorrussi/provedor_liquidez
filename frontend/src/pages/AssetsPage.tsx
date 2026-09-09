@@ -9,7 +9,7 @@ import { ASSET_CATEGORIES, formatUsd } from '../format';
 type SortKey = 'symbol' | 'name' | 'category' | 'pools_count' | 'total_tvl_usd';
 type SortDirection = 'asc' | 'desc';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 export function AssetsPage() {
   const [status, setStatus] = useState<IndexStatusResponse | null>(null);
@@ -19,6 +19,9 @@ export function AssetsPage() {
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const [exact, setExact] = useState(false);
+  const [hideInactive, setHideInactive] = useState(false);
+  const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>('total_tvl_usd');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [offset, setOffset] = useState(0);
@@ -49,12 +52,24 @@ export function AssetsPage() {
     loadStatus();
   }, []);
 
+  function fetchPage(currentOffset: number) {
+    return api.listAssets({
+      q: q || undefined,
+      category: category || undefined,
+      exact,
+      hideInactive,
+      sort: sortKey,
+      order: sortDirection,
+      limit: pageSize,
+      offset: currentOffset,
+    });
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api
-      .listAssets({ q: q || undefined, category: category || undefined, sort: sortKey, order: sortDirection, limit: PAGE_SIZE, offset })
+    fetchPage(offset)
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
@@ -69,7 +84,8 @@ export function AssetsPage() {
     return () => {
       cancelled = true;
     };
-  }, [q, category, sortKey, sortDirection, offset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, category, exact, hideInactive, pageSize, sortKey, sortDirection, offset]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -88,9 +104,7 @@ export function AssetsPage() {
       const newStatus = await api.refreshIndex();
       setStatus(newStatus);
       setOffset(0);
-      const res = await api.listAssets({
-        q: q || undefined, category: category || undefined, sort: sortKey, order: sortDirection, limit: PAGE_SIZE, offset: 0,
-      });
+      const res = await fetchPage(0);
       setItems(res.items);
       setTotal(res.total);
     } catch (err) {
@@ -100,8 +114,8 @@ export function AssetsPage() {
     }
   }
 
-  const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="index-page">
@@ -128,7 +142,13 @@ export function AssetsPage() {
           placeholder="Filtrar por símbolo ou nome"
           className="pool-search__input"
         />
-        <select value={category} onChange={(e) => { setCategory(e.target.value); setOffset(0); }}>
+        <select
+          value={category}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setOffset(0);
+          }}
+        >
           <option value="">Todas as categorias</option>
           {ASSET_CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -136,6 +156,47 @@ export function AssetsPage() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="advanced-filters advanced-filters--inline">
+        <label className="advanced-filters__checkbox">
+          <input
+            type="checkbox"
+            checked={exact}
+            onChange={(e) => {
+              setExact(e.target.checked);
+              setOffset(0);
+            }}
+          />
+          Sigla/nome exato
+        </label>
+        <label className="advanced-filters__checkbox">
+          <input
+            type="checkbox"
+            checked={hideInactive}
+            onChange={(e) => {
+              setHideInactive(e.target.checked);
+              setOffset(0);
+            }}
+          />
+          Ocultar sem atividade
+        </label>
+        <label>
+          Itens por página
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setOffset(0);
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {error && <p className="error-text">{error}</p>}
@@ -175,7 +236,7 @@ export function AssetsPage() {
           {!loading && items.length === 0 && <p className="muted">Nenhum ativo encontrado.</p>}
 
           <div className="index-page__pagination">
-            <button type="button" className="btn btn--secondary" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>
+            <button type="button" className="btn btn--secondary" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - pageSize))}>
               Anterior
             </button>
             <span className="muted">
@@ -184,8 +245,8 @@ export function AssetsPage() {
             <button
               type="button"
               className="btn btn--secondary"
-              disabled={offset + PAGE_SIZE >= total}
-              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              disabled={offset + pageSize >= total}
+              onClick={() => setOffset((o) => o + pageSize)}
             >
               Próxima
             </button>

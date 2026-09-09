@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS assets (
     category TEXT,
     pools_count INTEGER NOT NULL,
     total_tvl_usd REAL NOT NULL,
+    total_volume_usd REAL NOT NULL DEFAULT 0,
     top_pairs TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_assets_symbol ON assets(symbol);
@@ -82,9 +83,21 @@ def _connect():
         conn.close()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
+    """Migração mínima pra um arquivo local_index.db já existente de antes
+    dessa coluna existir -- `CREATE TABLE IF NOT EXISTS` não altera uma
+    tabela que já existe, e o cache é sempre reconstruído por completo (ver
+    replace_index), não vale a pena um sistema de migração de verdade aqui.
+    """
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+
+
 def init_schema() -> None:
     with _LOCK, _connect() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_column(conn, "assets", "total_volume_usd", "REAL NOT NULL DEFAULT 0")
         conn.commit()
 
 
@@ -99,6 +112,7 @@ class AssetRecord:
     category: str | None
     pools_count: int
     total_tvl_usd: float
+    total_volume_usd: float
     top_pairs: list[dict[str, Any]]
 
 
@@ -137,6 +151,7 @@ def _row_to_asset(row: sqlite3.Row) -> AssetRecord:
         category=row["category"],
         pools_count=row["pools_count"],
         total_tvl_usd=row["total_tvl_usd"],
+        total_volume_usd=row["total_volume_usd"],
         top_pairs=json.loads(row["top_pairs"]),
     )
 
@@ -167,10 +182,10 @@ def replace_index(
         conn.execute("DELETE FROM pools")
         conn.executemany(
             "INSERT INTO assets (id, chain, address, symbol, name, decimals, category, pools_count, "
-            "total_tvl_usd, top_pairs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "total_tvl_usd, total_volume_usd, top_pairs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (a.id, a.chain, a.address, a.symbol, a.name, a.decimals, a.category, a.pools_count,
-                 a.total_tvl_usd, json.dumps(a.top_pairs))
+                 a.total_tvl_usd, a.total_volume_usd, json.dumps(a.top_pairs))
                 for a in assets
             ],
         )
@@ -221,21 +236,43 @@ _POOL_SORT_COLUMNS = {
     "protocol", "token0_symbol", "token1_symbol", "fee_tier", "total_value_locked_usd", "volume_usd", "created_at",
 }
 
+# "Sem atividade" pro filtro hide_inactive -- mesmo critério usado em
+# services/pools.py::search_pools (piso pequeno em vez de "> 0" pra não
+# depender de precisão exata de ponto flutuante). Não é o mesmo conceito do
+# piso de "dado corrompido" (_MIN_PLAUSIBLE_VOLUME_USD em services/pools.py,
+# $100) -- esse aqui é só "teve alguma atividade real", não uma checagem
+# antifraude.
+_MIN_ACTIVE_VOLUME_USD = 0.01
+
 
 def query_assets(
-    q: str | None, category: str | None, sort: str, order: str, limit: int, offset: int
+    q: str | None,
+    category: str | None,
+    exact: bool,
+    hide_inactive: bool,
+    sort: str,
+    order: str,
+    limit: int,
+    offset: int,
 ) -> tuple[list[AssetRecord], int]:
     sort_col = sort if sort in _ASSET_SORT_COLUMNS else "total_tvl_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
     where: list[str] = []
     params: list[Any] = []
     if q:
-        where.append("(symbol LIKE ? OR name LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like])
+        if exact:
+            where.append("(symbol = ? COLLATE NOCASE OR name = ? COLLATE NOCASE)")
+            params.extend([q, q])
+        else:
+            where.append("(symbol LIKE ? OR name LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like])
     if category:
         where.append("category = ?")
         params.append(category)
+    if hide_inactive:
+        where.append("total_volume_usd >= ?")
+        params.append(_MIN_ACTIVE_VOLUME_USD)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     init_schema()
@@ -260,19 +297,54 @@ def suggest_assets(prefix: str, limit: int) -> list[AssetRecord]:
 
 
 def query_pools(
-    q: str | None, protocol: str | None, sort: str, order: str, limit: int, offset: int
+    q: str | None,
+    token_a: str | None,
+    token_b: str | None,
+    exact: bool,
+    hide_inactive: bool,
+    protocol: str | None,
+    sort: str,
+    order: str,
+    limit: int,
+    offset: int,
 ) -> tuple[list[PoolRecord], int]:
     sort_col = sort if sort in _POOL_SORT_COLUMNS else "total_value_locked_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
     where: list[str] = []
     params: list[Any] = []
-    if q:
-        where.append("(token0_symbol LIKE ? OR token1_symbol LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like])
+
+    # Busca por par (as duas siglas em qualquer ordem, ex: "ETH" + "TSLA")
+    # tem prioridade sobre a busca de texto livre -- mesmo comportamento da
+    # busca ao vivo em services/pools.py::search_pools.
+    if token_a and token_b:
+        if exact:
+            where.append(
+                "((token0_symbol = ? COLLATE NOCASE AND token1_symbol = ? COLLATE NOCASE) OR "
+                "(token0_symbol = ? COLLATE NOCASE AND token1_symbol = ? COLLATE NOCASE))"
+            )
+            params.extend([token_a, token_b, token_b, token_a])
+        else:
+            where.append(
+                "((token0_symbol LIKE ? AND token1_symbol LIKE ?) OR "
+                "(token0_symbol LIKE ? AND token1_symbol LIKE ?))"
+            )
+            like_a, like_b = f"%{token_a}%", f"%{token_b}%"
+            params.extend([like_a, like_b, like_b, like_a])
+    elif q:
+        if exact:
+            where.append("(token0_symbol = ? COLLATE NOCASE OR token1_symbol = ? COLLATE NOCASE)")
+            params.extend([q, q])
+        else:
+            where.append("(token0_symbol LIKE ? OR token1_symbol LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like])
+
     if protocol:
         where.append("protocol = ?")
         params.append(protocol)
+    if hide_inactive:
+        where.append("volume_usd >= ?")
+        params.append(_MIN_ACTIVE_VOLUME_USD)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     init_schema()

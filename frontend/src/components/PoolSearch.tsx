@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
-import type { AssetIndexRow, PoolSummary } from '../api/types';
+import type { AssetIndexRow, Protocol, PoolSummary } from '../api/types';
 import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
 import { SortableHeader } from './SortableHeader';
 
@@ -18,17 +18,16 @@ const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
   volume: 'desc',
 };
 
-// Teto de resultados por busca -- cada busca é 1-3 chamadas ao gateway do Graph
-// (a lista + até 2 páginas dos dados diários agregados) independente desse
-// número, mas um valor muito alto deixaria a lista longa demais. Se bater
-// nesse número, pode ter mais pools que não estão sendo mostrados.
-const SEARCH_LIMIT = 50;
+const ALL_PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome'];
+const RESULT_LIMIT_OPTIONS = [25, 50, 100];
 
 export function PoolSearch() {
   const navigate = useNavigate();
   // O termo buscado fica na URL (?q=...) pra sobreviver ao botão voltar do
   // navegador quando se abre um pool e volta -- sem isso, voltar da página do
-  // pool perderia os resultados e obrigaria a buscar de novo.
+  // pool perderia os resultados e obrigaria a buscar de novo. Os filtros
+  // avançados abaixo não vão pra URL (mesma decisão já tomada pra ordenação
+  // de coluna) -- resetam ao voltar, igual ordenação já fazia.
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get('q') ?? '';
 
@@ -39,7 +38,19 @@ export function PoolSearch() {
   const [searched, setSearched] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('tvl');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [hideZeroVolume, setHideZeroVolume] = useState(false);
+
+  // Filtros avançados -- só são "aplicados" de verdade quando o formulário é
+  // submetido (searchTrigger incrementa e força a busca a rodar de novo
+  // mesmo se o texto de `q` não mudou, ex: busca só por par de tokens).
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [tokenA, setTokenA] = useState('');
+  const [tokenB, setTokenB] = useState('');
+  const [exact, setExact] = useState(false);
+  const [hideInactive, setHideInactive] = useState(false);
+  const [minTvl, setMinTvl] = useState('');
+  const [selectedProtocols, setSelectedProtocols] = useState<Protocol[]>([]);
+  const [resultLimit, setResultLimit] = useState(50);
+  const [searchTrigger, setSearchTrigger] = useState(0);
 
   // Sugestões de autocomplete vêm do índice local (SQLite, ver
   // backend/app/local_db.py), não do gateway do Graph -- por isso pode
@@ -74,7 +85,8 @@ export function PoolSearch() {
 
   useEffect(() => {
     setQuery(urlQuery);
-    if (!urlQuery.trim()) {
+    const pairMode = tokenA.trim() && tokenB.trim();
+    if (!urlQuery.trim() && !pairMode) {
       setResults([]);
       setSearched(false);
       return;
@@ -83,7 +95,16 @@ export function PoolSearch() {
     setLoading(true);
     setError(null);
     api
-      .searchPools(urlQuery.trim(), SEARCH_LIMIT)
+      .searchPools({
+        q: pairMode ? undefined : urlQuery.trim(),
+        tokenA: pairMode ? tokenA.trim() : undefined,
+        tokenB: pairMode ? tokenB.trim() : undefined,
+        exact,
+        hideInactive,
+        minTvlUsd: minTvl ? Number(minTvl) : undefined,
+        protocols: selectedProtocols.length > 0 ? selectedProtocols : undefined,
+        limit: resultLimit,
+      })
       .then((pools) => {
         if (cancelled) return;
         setResults(pools);
@@ -98,7 +119,12 @@ export function PoolSearch() {
     return () => {
       cancelled = true;
     };
-  }, [urlQuery]);
+    // Os filtros avançados só devem disparar uma nova busca quando o
+    // formulário é submetido (searchTrigger), não a cada tecla digitada
+    // neles -- por isso não entram na lista de dependências (o valor lido
+    // é sempre o mais atual da renderização que disparou o efeito).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery, searchTrigger]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -111,26 +137,39 @@ export function PoolSearch() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (!query.trim()) return;
+    const pairMode = tokenA.trim() && tokenB.trim();
+    if (!query.trim() && !pairMode) return;
     setShowSuggestions(false);
-    setSearchParams({ q: query.trim() });
+    if (query.trim() === urlQuery) {
+      // Se o texto de `q` não mudou (ex: só mexeu nos filtros avançados, ou
+      // busca por par sem preencher `q`), a URL não muda -- precisa desse
+      // empurrão extra pro efeito de busca rodar de novo.
+      setSearchTrigger((n) => n + 1);
+    } else {
+      setSearchParams(query.trim() ? { q: query.trim() } : {});
+    }
   }
 
   function handleSuggestionSelect(asset: AssetIndexRow) {
     setQuery(asset.symbol);
     setShowSuggestions(false);
+    setTokenA('');
+    setTokenB('');
     setSearchParams({ q: asset.symbol });
+  }
+
+  function toggleProtocol(protocol: Protocol) {
+    setSelectedProtocols((current) =>
+      current.includes(protocol) ? current.filter((p) => p !== protocol) : [...current, protocol],
+    );
   }
 
   function handleSelect(pool: PoolSummary) {
     navigate(`/pool/${encodeURIComponent(pool.id)}`);
   }
 
-  const zeroVolumeCount = useMemo(() => results.filter((p) => p.volume_usd === 0).length, [results]);
-
   const sortedResults = useMemo(() => {
-    const visible = hideZeroVolume ? results.filter((p) => p.volume_usd > 0) : results;
-    const sorted = [...visible];
+    const sorted = [...results];
     const sign = sortDirection === 'asc' ? 1 : -1;
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -153,7 +192,7 @@ export function PoolSearch() {
       }
     });
     return sorted;
-  }, [results, sortKey, sortDirection, hideZeroVolume]);
+  }, [results, sortKey, sortDirection]);
 
   return (
     <div className="pool-search">
@@ -198,6 +237,94 @@ export function PoolSearch() {
         </button>
       </form>
 
+      <button type="button" className="advanced-filters__toggle" onClick={() => setShowAdvanced((v) => !v)}>
+        {showAdvanced ? '▾' : '▸'} Filtros avançados
+      </button>
+
+      {showAdvanced && (
+        <form onSubmit={handleSearch} className="advanced-filters">
+          <div className="advanced-filters__row">
+            <label>
+              Token A (par)
+              <input
+                type="text"
+                value={tokenA}
+                onChange={(e) => setTokenA(e.target.value)}
+                placeholder="ex: ETH"
+              />
+            </label>
+            <label>
+              Token B (par)
+              <input
+                type="text"
+                value={tokenB}
+                onChange={(e) => setTokenB(e.target.value)}
+                placeholder="ex: TSLA"
+              />
+            </label>
+          </div>
+          <p className="footnote advanced-filters__hint">
+            Preenchendo os dois, busca pools que tenham os dois tokens (em qualquer ordem) em vez de usar o campo de
+            busca principal — ex: "ETH" + "TSLA" acha pools de ETH com TSLA.
+          </p>
+
+          <div className="advanced-filters__row">
+            <label className="advanced-filters__checkbox">
+              <input type="checkbox" checked={exact} onChange={(e) => setExact(e.target.checked)} />
+              Sigla/nome exato (em vez de "contém")
+            </label>
+            <label className="advanced-filters__checkbox">
+              <input type="checkbox" checked={hideInactive} onChange={(e) => setHideInactive(e.target.checked)} />
+              Ocultar pools sem atividade
+            </label>
+          </div>
+
+          <div className="advanced-filters__row">
+            <label>
+              TVL mínimo (USD)
+              <input
+                type="number"
+                min={0}
+                value={minTvl}
+                onChange={(e) => setMinTvl(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label>
+              Nº de resultados
+              <select value={resultLimit} onChange={(e) => setResultLimit(Number(e.target.value))}>
+                {RESULT_LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="advanced-filters__row">
+            <span className="advanced-filters__label">Protocolos</span>
+            <div className="advanced-filters__protocols">
+              {ALL_PROTOCOLS.map((p) => (
+                <label key={p} className="advanced-filters__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedProtocols.includes(p)}
+                    onChange={() => toggleProtocol(p)}
+                  />
+                  {protocolLabel(p)}
+                </label>
+              ))}
+            </div>
+            <span className="footnote">Nenhum marcado = todos.</span>
+          </div>
+
+          <button type="submit" disabled={loading} className="btn btn--primary">
+            {loading ? 'Buscando...' : 'Aplicar filtros'}
+          </button>
+        </form>
+      )}
+
       {error && <p className="error-text">{error}</p>}
 
       {searched && !loading && results.length === 0 && !error && (
@@ -219,19 +346,6 @@ export function PoolSearch() {
             simplificada (sem simulador de faixa e sem gráfico de preço, já que v2 não tem liquidez
             concentrada nem histórico OHLC indexado).
           </p>
-
-          {zeroVolumeCount > 0 && (
-            <div className="pool-list__controls">
-              <label className="pool-list__toggle">
-                <input
-                  type="checkbox"
-                  checked={hideZeroVolume}
-                  onChange={(e) => setHideZeroVolume(e.target.checked)}
-                />
-                Ocultar sem volume histórico ({zeroVolumeCount})
-              </label>
-            </div>
-          )}
 
           <div className="pool-table">
             <div className="pool-list__header">
@@ -335,10 +449,10 @@ export function PoolSearch() {
             </ul>
           </div>
 
-          {results.length === SEARCH_LIMIT && (
+          {results.length === resultLimit && (
             <p className="footnote">
-              Mostrando os {SEARCH_LIMIT} pools de maior TVL que combinam com "{query}" — pode haver mais que não
-              estão sendo exibidos.
+              Mostrando os {resultLimit} pools de maior TVL que combinam com essa busca — pode haver mais que não
+              estão sendo exibidos (ajuste "Nº de resultados" nos filtros avançados).
             </p>
           )}
         </>

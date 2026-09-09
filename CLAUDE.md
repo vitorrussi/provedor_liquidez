@@ -198,6 +198,44 @@ resultados no cliente). As duas tabelas usam classes de grid próprias
 (`.pool-list__header--assets`/`--pools-index`) porque têm número de colunas diferente da lista de
 busca principal (sem coluna de "#").
 
+## Filtros avançados de busca (sigla exata, par de tokens, ocultar sem atividade)
+
+As três telas de busca/listagem (`PoolSearch.tsx`, `/assets`, `/pools`) têm um painel de "Filtros
+avançados" com: busca por **sigla/nome exato** em vez de "contém"; busca por **par de tokens** (dois
+campos, ex: ETH + TSLA, acha pools com os dois em qualquer ordem -- ver por quê "qualquer ordem"
+importa na próxima seção); **ocultar pools sem atividade** (volume histórico zero); piso de TVL
+mínimo; filtro de protocolo; e nº de itens por página (25/50/100).
+
+O ponto que não é óbvio: **esses filtros são aplicados na própria consulta** (GraphQL `where` pra
+`PoolSearch`, SQL `WHERE` pra `/assets`/`/pools`), não depois de buscar -- "ocultar sem atividade",
+em particular, substituiu um toggle antigo que filtrava client-side depois do fetch (isso desperdiçava
+posições do `limit` com pools mortas; agora o próprio `limit` já é só de resultados relevantes).
+
+- **`services/pools.py`**: `_search_query_v3v4(exact)`/`_search_query_v2(exact)` e
+  `_pair_search_query_v3v4(exact)`/`_pair_search_query_v2(exact)` são *funções*, não constantes --
+  "exato" muda o nome do campo GraphQL (`symbol` vs `symbol_contains_nocase`), o que só dá pra
+  parametrizar como texto da query, não como variável. Já `min_tvl`/`min_volume` (piso de TVL/"sem
+  atividade") são variáveis GraphQL de verdade (0 = sem efeito), então não multiplicam o número de
+  templates. Verificado por consulta real em 2026-09-09: `symbol`/`name` exatos existem em
+  `Token_filter` tanto em v2 quanto v3, e combinam com filtros de TVL/volume no mesmo `where`
+  (semântica AND).
+- **Busca por par sempre consulta as duas ordens** (`ab`/`ba`, dois aliases) -- token0/token1 é
+  canônico por endereço (menor primeiro), não por qual token "parece" ser o principal. Confirmado ao
+  vivo: WETH/USDC de verdade tem quase todo o TVL do lado `token0=USDC`/`token1=WETH`, não o
+  contrário -- sem consultar as duas ordens, a busca por par perderia a maioria dos resultados reais.
+- **`local_db.py`** replica a mesma lógica em SQL (`query_pools`/`query_assets` recebem `exact`,
+  `hide_inactive`, e `query_pools` também `token_a`/`token_b`) -- exato usa `= ? COLLATE NOCASE` (não
+  `=` puro, que é case-sensitive no SQLite) pra continuar case-insensitive como o "contém". Pra
+  "ocultar sem atividade" funcionar em `/assets` (não só em `/pools`), a tabela `assets` ganhou uma
+  coluna `total_volume_usd` (soma do volume das pools onde o ativo aparece, calculada em
+  `index_builder.py` junto com `total_tvl_usd`) -- um arquivo `local_index.db` de antes dessa coluna
+  existir é migrado on-the-fly via `_ensure_column` (`ALTER TABLE ... ADD COLUMN`) em vez de precisar
+  apagar o cache manualmente.
+- **`PoolSearch.tsx`**: os filtros avançados não vão pra URL (mesma decisão já tomada pra
+  ordenação/toggle antigo -- resetam ao voltar da página de detalhe de um pool). Como a busca por par
+  não depende do campo `q` mudar, existe um `searchTrigger` (contador incrementado a cada submit) só
+  pra forçar o efeito de busca a rodar de novo mesmo quando `q` continua vazio/igual.
+
 ## Preferência do usuário: não derrubar o servidor de dev à toa
 
 **Antes de editar código, rode `scripts/dev.sh status`.** Se os dois (backend/frontend) já

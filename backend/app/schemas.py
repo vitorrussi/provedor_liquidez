@@ -135,6 +135,7 @@ class AssetIndexRow(BaseModel):
     category: str | None
     pools_count: int
     total_tvl_usd: float
+    total_volume_usd: float
     top_pairs: list[AssetTopPair]
 
 

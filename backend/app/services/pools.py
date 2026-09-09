@@ -79,99 +79,123 @@ def _rpc_url_for_protocol(protocol: str) -> str:
 # em paralelo) continuam no timeout padrão de graph_client.run_query.
 _SEARCH_TIMEOUT = 10.0
 
-_SEARCH_QUERY = """
-query SearchPools($search: String!, $first: Int!) {
-  bySymbol0: pools(
-    where: { token0_: { symbol_contains_nocase: $search } }
-    orderBy: totalValueLockedUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PoolFields
-  }
-  bySymbol1: pools(
-    where: { token1_: { symbol_contains_nocase: $search } }
-    orderBy: totalValueLockedUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PoolFields
-  }
-  byName0: pools(
-    where: { token0_: { name_contains_nocase: $search } }
-    orderBy: totalValueLockedUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PoolFields
-  }
-  byName1: pools(
-    where: { token1_: { name_contains_nocase: $search } }
-    orderBy: totalValueLockedUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PoolFields
-  }
-}
+# Templates (não constantes estáticas) porque "busca exata" vs "busca por
+# trecho" muda o NOME do campo usado no `where` (symbol vs
+# symbol_contains_nocase) -- não dá pra parametrizar isso como variável
+# GraphQL, só como texto da query. `min_tvl`/`min_volume` (piso de TVL e
+# "ocultar sem atividade") continuam como variáveis de verdade -- não geram
+# uma query diferente, só um valor diferente (0 = sem efeito). Verificado por
+# introspecção/consulta real em 2026-09-09: `symbol`/`name` (exato) existem
+# em Token_filter tanto em v2 quanto v3, e combinam com filtros de TVL/volume
+# no mesmo `where` sem problema (semântica AND).
+def _search_query_v3v4(exact: bool) -> str:
+    symbol_field = "symbol" if exact else "symbol_contains_nocase"
+    name_field = "name" if exact else "name_contains_nocase"
+    return f"""
+    query SearchPools($search: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+      bySymbol0: pools(
+        where: {{ token0_: {{ {symbol_field}: $search }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+      bySymbol1: pools(
+        where: {{ token1_: {{ {symbol_field}: $search }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+      byName0: pools(
+        where: {{ token0_: {{ {name_field}: $search }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+      byName1: pools(
+        where: {{ token1_: {{ {name_field}: $search }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+    }}
+    fragment PoolFields on Pool {{
+      id feeTier totalValueLockedUSD volumeUSD
+      token0 {{ id symbol name decimals }}
+      token1 {{ id symbol name decimals }}
+    }}
+    """
 
-fragment PoolFields on Pool {
-  id
-  feeTier
-  totalValueLockedUSD
-  volumeUSD
-  token0 { id symbol name decimals }
-  token1 { id symbol name decimals }
-}
-"""
 
 # Schema do subgraph v2 é mais simples (entidade Pair, sem feeTier/tick/liquidez
 # concentrada) -- mesma estrutura de busca (4 aliases + dedupe client-side),
-# campos diferentes.
-_SEARCH_QUERY_V2 = """
-query SearchPairs($search: String!, $first: Int!) {
-  bySymbol0: pairs(
-    where: { token0_: { symbol_contains_nocase: $search } }
-    orderBy: reserveUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PairFields
-  }
-  bySymbol1: pairs(
-    where: { token1_: { symbol_contains_nocase: $search } }
-    orderBy: reserveUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PairFields
-  }
-  byName0: pairs(
-    where: { token0_: { name_contains_nocase: $search } }
-    orderBy: reserveUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PairFields
-  }
-  byName1: pairs(
-    where: { token1_: { name_contains_nocase: $search } }
-    orderBy: reserveUSD
-    orderDirection: desc
-    first: $first
-  ) {
-    ...PairFields
-  }
-}
+# campos diferentes (reserveUSD no lugar de totalValueLockedUSD).
+def _search_query_v2(exact: bool) -> str:
+    symbol_field = "symbol" if exact else "symbol_contains_nocase"
+    name_field = "name" if exact else "name_contains_nocase"
+    return f"""
+    query SearchPairs($search: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+      bySymbol0: pairs(
+        where: {{ token0_: {{ {symbol_field}: $search }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+      bySymbol1: pairs(
+        where: {{ token1_: {{ {symbol_field}: $search }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+      byName0: pairs(
+        where: {{ token0_: {{ {name_field}: $search }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+      byName1: pairs(
+        where: {{ token1_: {{ {name_field}: $search }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+    }}
+    fragment PairFields on Pair {{
+      id reserveUSD volumeUSD
+      token0 {{ id symbol name decimals }}
+      token1 {{ id symbol name decimals }}
+    }}
+    """
 
-fragment PairFields on Pair {
-  id
-  reserveUSD
-  volumeUSD
-  token0 { id symbol name decimals }
-  token1 { id symbol name decimals }
-}
-"""
+
+# Busca por par (as duas siglas, em qualquer ordem) -- ex: "pools de ETH com
+# TSLA". Precisa das DUAS combinações de ordem (ab/ba) porque token0/token1 é
+# canônico por endereço (menor primeiro), não por qual "parece" ser o token
+# principal -- confirmado ao vivo em 2026-09-09: WETH/USDC real tem quase
+# todo o TVL do lado token0=USDC/token1=WETH, não o contrário.
+def _pair_search_query_v3v4(exact: bool) -> str:
+    field = "symbol" if exact else "symbol_contains_nocase"
+    return f"""
+    query PairSearchPools($a: String!, $b: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+      ab: pools(
+        where: {{ token0_: {{ {field}: $a }}, token1_: {{ {field}: $b }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+      ba: pools(
+        where: {{ token0_: {{ {field}: $b }}, token1_: {{ {field}: $a }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) {{ ...PoolFields }}
+    }}
+    fragment PoolFields on Pool {{
+      id feeTier totalValueLockedUSD volumeUSD
+      token0 {{ id symbol name decimals }}
+      token1 {{ id symbol name decimals }}
+    }}
+    """
+
+
+def _pair_search_query_v2(exact: bool) -> str:
+    field = "symbol" if exact else "symbol_contains_nocase"
+    return f"""
+    query PairSearchPairs($a: String!, $b: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+      ab: pairs(
+        where: {{ token0_: {{ {field}: $a }}, token1_: {{ {field}: $b }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+      ba: pairs(
+        where: {{ token0_: {{ {field}: $b }}, token1_: {{ {field}: $a }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) {{ ...PairFields }}
+    }}
+    fragment PairFields on Pair {{
+      id reserveUSD volumeUSD
+      token0 {{ id symbol name decimals }}
+      token1 {{ id symbol name decimals }}
+    }}
+    """
 
 _BATCH_DAY_DATA_QUERY = """
 query BatchPoolDayData($poolIds: [String!]!, $since: Int!, $first: Int!, $skip: Int!) {
@@ -257,7 +281,7 @@ query PairDetail($id: ID!) {
 # versão v2/v3/v4 do mesmo par) -- usado por get_related_pools. `token0`/
 # `token1` aqui filtram pelo endereço do token diretamente (tipo String,
 # confirmado por introspecção em 2026-09-09), não pela busca por símbolo/nome
-# usada em _SEARCH_QUERY. A ordem token0/token1 é canônica (endereço menor
+# usada em _search_query_v3v4. A ordem token0/token1 é canônica (endereço menor
 # primeiro), igual em todo deployment Uniswap, então dá pra reusar os
 # endereços do pool de origem sem inverter.
 _RELATED_POOLS_QUERY = """
@@ -466,11 +490,29 @@ def _aggregate_pool_stats(day_rows: list[tuple[int, float, float]], tvl_usd: flo
     )
 
 
-async def _search_v3v4(protocol: str, search: str, limit: int) -> list[PoolSummary]:
-    data = await graph_client.run_query(
-        _SEARCH_QUERY, {"search": search, "first": limit}, protocol=protocol, timeout=_SEARCH_TIMEOUT
-    )
-    raw_pools = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
+async def _search_v3v4(
+    protocol: str,
+    search: str | None,
+    token_a: str | None,
+    token_b: str | None,
+    exact: bool,
+    min_tvl_usd: float,
+    min_volume_usd: float,
+    limit: int,
+) -> list[PoolSummary]:
+    variables = {"first": limit, "minTvl": str(min_tvl_usd), "minVolume": str(min_volume_usd)}
+    if token_a and token_b:
+        query = _pair_search_query_v3v4(exact)
+        data = await graph_client.run_query(
+            query, {**variables, "a": token_a, "b": token_b}, protocol=protocol, timeout=_SEARCH_TIMEOUT
+        )
+        raw_pools = data["ab"] + data["ba"]
+    else:
+        query = _search_query_v3v4(exact)
+        data = await graph_client.run_query(
+            query, {**variables, "search": search}, protocol=protocol, timeout=_SEARCH_TIMEOUT
+        )
+        raw_pools = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
     seen: set[str] = set()
     results: list[PoolSummary] = []
     for raw in raw_pools:
@@ -481,11 +523,28 @@ async def _search_v3v4(protocol: str, search: str, limit: int) -> list[PoolSumma
     return results
 
 
-async def _search_v2(search: str, limit: int) -> list[PoolSummary]:
-    data = await graph_client.run_query(
-        _SEARCH_QUERY_V2, {"search": search, "first": limit}, protocol="v2", timeout=_SEARCH_TIMEOUT
-    )
-    raw_pairs = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
+async def _search_v2(
+    search: str | None,
+    token_a: str | None,
+    token_b: str | None,
+    exact: bool,
+    min_tvl_usd: float,
+    min_volume_usd: float,
+    limit: int,
+) -> list[PoolSummary]:
+    variables = {"first": limit, "minTvl": str(min_tvl_usd), "minVolume": str(min_volume_usd)}
+    if token_a and token_b:
+        query = _pair_search_query_v2(exact)
+        data = await graph_client.run_query(
+            query, {**variables, "a": token_a, "b": token_b}, protocol="v2", timeout=_SEARCH_TIMEOUT
+        )
+        raw_pairs = data["ab"] + data["ba"]
+    else:
+        query = _search_query_v2(exact)
+        data = await graph_client.run_query(
+            query, {**variables, "search": search}, protocol="v2", timeout=_SEARCH_TIMEOUT
+        )
+        raw_pairs = data["bySymbol0"] + data["bySymbol1"] + data["byName0"] + data["byName1"]
     seen: set[str] = set()
     results: list[PoolSummary] = []
     for raw in raw_pairs:
@@ -496,26 +555,53 @@ async def _search_v2(search: str, limit: int) -> list[PoolSummary]:
     return results
 
 
-async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
-    """Busca nos quatro subgraphs (v3, v4, v2, Aerodrome Slipstream) em
-    paralelo e mescla por TVL.
+async def search_pools(
+    search: str | None = None,
+    token_a: str | None = None,
+    token_b: str | None = None,
+    exact: bool = False,
+    hide_inactive: bool = False,
+    min_tvl_usd: float = 0.0,
+    protocols: list[str] | None = None,
+    limit: int = 15,
+) -> list[PoolSummary]:
+    """Busca nos subgraphs selecionados (por padrão os 4: v3, v4, v2,
+    Aerodrome Slipstream) em paralelo e mescla por TVL.
 
-    Custo em chamadas ao gateway: 4 de busca + até 2 de enriquecimento (dados
-    diários) por protocolo com resultados = até 12 no total por busca (era 3
-    quando só existia v3).
+    Dois modos, mutuamente exclusivos: busca por texto (`search`, contém ou
+    exato conforme `exact`, casa símbolo OU nome) e busca por par (`token_a`
+    + `token_b`, as duas siglas em qualquer ordem -- ex: "pools de ETH com
+    TSLA"). O modo par vence se os dois estiverem preenchidos.
+
+    `hide_inactive` filtra na própria consulta ao Graph (via `volumeUSD_gte`
+    um pouco acima de zero) pools sem nenhum volume histórico -- não é um
+    filtro client-side depois de buscar, então libera espaço no `limit` pra
+    resultados de verdade em vez de pools mortas. `min_tvl_usd` funciona do
+    mesmo jeito para TVL.
+
+    Custo em chamadas ao gateway: até 4 de busca (1 por protocolo ativo) +
+    até 2 de enriquecimento (dados diários) por protocolo com resultados.
 
     Cada protocolo é isolado com `return_exceptions=True`: o subgraph v4, em
     particular, foi observado respondendo em >20s para termos de busca muito
     comuns (ex: "WETH") -- se um protocolo falhar ou estourar o timeout, os
-    outros dois ainda são retornados em vez de derrubar a busca inteira.
+    outros ainda são retornados em vez de derrubar a busca inteira.
     """
-    raw_results = await asyncio.gather(
-        _search_v3v4("v3", search, limit),
-        _search_v3v4("v4", search, limit),
-        _search_v2(search, limit),
-        _search_v3v4("aerodrome", search, limit),
-        return_exceptions=True,
-    )
+    active_protocols = protocols or ["v3", "v4", "v2", "aerodrome"]
+    # "Sem atividade" = volume histórico zero (mesmo critério do badge "sem
+    # atividade" no frontend) -- um piso pequeno em vez de "> 0" pra não
+    # depender de precisão exata de ponto flutuante no lado do subgraph.
+    min_volume_usd = 0.01 if hide_inactive else 0.0
+
+    coros = []
+    for protocol in active_protocols:
+        if protocol == "v2":
+            coros.append(_search_v2(search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, limit))
+        else:
+            coros.append(
+                _search_v3v4(protocol, search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, limit)
+            )
+    raw_results = await asyncio.gather(*coros, return_exceptions=True)
     results: list[PoolSummary] = []
     for r in raw_results:
         if isinstance(r, BaseException):
@@ -530,7 +616,7 @@ async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
     for pool in results:
         by_protocol.setdefault(pool.protocol, []).append(pool)
 
-    protocols = list(by_protocol.keys())
+    result_protocols = list(by_protocol.keys())
     day_data_batches = await asyncio.gather(
         *[
             _fetch_recent_day_data_batch(protocol, [p.id.split(":", 1)[1] for p in pools])
@@ -539,7 +625,7 @@ async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
         return_exceptions=True,
     )
     day_data_by_protocol: dict[str, dict[str, list[tuple[int, float, float]]]] = {}
-    for protocol, batch in zip(protocols, day_data_batches):
+    for protocol, batch in zip(result_protocols, day_data_batches):
         # Se o enriquecimento falhar para um protocolo, os pools desse
         # protocolo continuam na lista, só sem volume 1d/30d/APR (mesmo
         # visual de pool sem histórico -- degradação aceitável).

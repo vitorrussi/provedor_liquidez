@@ -9,7 +9,7 @@ import { formatFeeTier, formatUsd, protocolLabel } from '../format';
 type SortKey = 'token0_symbol' | 'protocol' | 'fee_tier' | 'total_value_locked_usd' | 'volume_usd' | 'created_at';
 type SortDirection = 'asc' | 'desc';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome'];
 
 export function PoolsIndexPage() {
@@ -21,7 +21,14 @@ export function PoolsIndexPage() {
 
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
+  const [tokenAInput, setTokenAInput] = useState('');
+  const [tokenBInput, setTokenBInput] = useState('');
+  const [tokenA, setTokenA] = useState('');
+  const [tokenB, setTokenB] = useState('');
   const [protocol, setProtocol] = useState('');
+  const [exact, setExact] = useState(false);
+  const [hideInactive, setHideInactive] = useState(false);
+  const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>('total_value_locked_usd');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [offset, setOffset] = useState(0);
@@ -34,10 +41,12 @@ export function PoolsIndexPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setQ(qInput.trim());
+      setTokenA(tokenAInput.trim());
+      setTokenB(tokenBInput.trim());
       setOffset(0);
     }, 250);
     return () => clearTimeout(timer);
-  }, [qInput]);
+  }, [qInput, tokenAInput, tokenBInput]);
 
   useEffect(() => {
     api
@@ -46,13 +55,19 @@ export function PoolsIndexPage() {
       .catch(() => {});
   }, []);
 
+  const pairMode = Boolean(tokenA && tokenB);
+
   function fetchPage(currentOffset: number) {
     return api.listPoolsIndex({
-      q: q || undefined,
+      q: pairMode ? undefined : q || undefined,
+      tokenA: pairMode ? tokenA : undefined,
+      tokenB: pairMode ? tokenB : undefined,
+      exact,
+      hideInactive,
       protocol: protocol || undefined,
       sort: sortKey,
       order: sortDirection,
-      limit: PAGE_SIZE,
+      limit: pageSize,
       offset: currentOffset,
     });
   }
@@ -77,7 +92,7 @@ export function PoolsIndexPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, protocol, sortKey, sortDirection, offset]);
+  }, [q, tokenA, tokenB, exact, hideInactive, protocol, pageSize, sortKey, sortDirection, offset]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -106,8 +121,8 @@ export function PoolsIndexPage() {
     }
   }
 
-  const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="index-page">
@@ -131,6 +146,7 @@ export function PoolsIndexPage() {
           onChange={(e) => setQInput(e.target.value)}
           placeholder="Filtrar por símbolo do token"
           className="pool-search__input"
+          disabled={pairMode}
         />
         <select
           value={protocol}
@@ -147,6 +163,61 @@ export function PoolsIndexPage() {
           ))}
         </select>
       </div>
+
+      <div className="advanced-filters advanced-filters--inline">
+        <label>
+          Token A (par)
+          <input type="text" value={tokenAInput} onChange={(e) => setTokenAInput(e.target.value)} placeholder="ex: ETH" />
+        </label>
+        <label>
+          Token B (par)
+          <input type="text" value={tokenBInput} onChange={(e) => setTokenBInput(e.target.value)} placeholder="ex: TSLA" />
+        </label>
+        <label className="advanced-filters__checkbox">
+          <input
+            type="checkbox"
+            checked={exact}
+            onChange={(e) => {
+              setExact(e.target.checked);
+              setOffset(0);
+            }}
+          />
+          Sigla exata
+        </label>
+        <label className="advanced-filters__checkbox">
+          <input
+            type="checkbox"
+            checked={hideInactive}
+            onChange={(e) => {
+              setHideInactive(e.target.checked);
+              setOffset(0);
+            }}
+          />
+          Ocultar sem atividade
+        </label>
+        <label>
+          Itens por página
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setOffset(0);
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {pairMode && (
+        <p className="footnote">
+          Buscando pools com {tokenA} e {tokenB} (em qualquer ordem) — o filtro de texto acima fica desativado
+          enquanto os dois campos de par estiverem preenchidos.
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -191,7 +262,7 @@ export function PoolsIndexPage() {
           {!loading && items.length === 0 && <p className="muted">Nenhuma pool encontrada.</p>}
 
           <div className="index-page__pagination">
-            <button type="button" className="btn btn--secondary" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>
+            <button type="button" className="btn btn--secondary" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - pageSize))}>
               Anterior
             </button>
             <span className="muted">
@@ -200,8 +271,8 @@ export function PoolsIndexPage() {
             <button
               type="button"
               className="btn btn--secondary"
-              disabled={offset + PAGE_SIZE >= total}
-              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              disabled={offset + pageSize >= total}
+              onClick={() => setOffset((o) => o + pageSize)}
             >
               Próxima
             </button>

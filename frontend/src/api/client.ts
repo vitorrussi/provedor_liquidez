@@ -38,9 +38,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+export interface PoolSearchParams {
+  q?: string;
+  tokenA?: string;
+  tokenB?: string;
+  exact?: boolean;
+  hideInactive?: boolean;
+  minTvlUsd?: number;
+  protocols?: string[];
+  limit?: number;
+}
+
 export const api = {
-  searchPools: (q: string, limit = 50) =>
-    request<PoolSummary[]>(`/api/pools/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  searchPools: (params: PoolSearchParams) =>
+    request<PoolSummary[]>(
+      `/api/pools/search?${buildQuery({
+        q: params.q,
+        token_a: params.tokenA,
+        token_b: params.tokenB,
+        exact: params.exact ? 'true' : undefined,
+        hide_inactive: params.hideInactive ? 'true' : undefined,
+        min_tvl_usd: params.minTvlUsd,
+        protocol: params.protocols,
+        limit: params.limit,
+      })}`,
+    ),
 
   getPool: (poolId: string) => request<PoolDetail>(`/api/pools/${encodeURIComponent(poolId)}`),
 
@@ -76,29 +98,68 @@ export const api = {
   listAssets: (params: {
     q?: string;
     category?: string;
+    exact?: boolean;
+    hideInactive?: boolean;
     sort?: string;
     order?: 'asc' | 'desc';
     limit?: number;
     offset?: number;
-  }) => request<AssetIndexResponse>(`/api/index/assets?${buildQuery(params)}`),
+  }) =>
+    request<AssetIndexResponse>(
+      `/api/index/assets?${buildQuery({
+        q: params.q,
+        category: params.category,
+        exact: params.exact ? 'true' : undefined,
+        hide_inactive: params.hideInactive ? 'true' : undefined,
+        sort: params.sort,
+        order: params.order,
+        limit: params.limit,
+        offset: params.offset,
+      })}`,
+    ),
 
   suggestAssets: (prefix: string, limit = 8) =>
     request<AssetIndexRow[]>(`/api/index/assets/suggest?prefix=${encodeURIComponent(prefix)}&limit=${limit}`),
 
   listPoolsIndex: (params: {
     q?: string;
+    tokenA?: string;
+    tokenB?: string;
+    exact?: boolean;
+    hideInactive?: boolean;
     protocol?: string;
     sort?: string;
     order?: 'asc' | 'desc';
     limit?: number;
     offset?: number;
-  }) => request<PoolIndexResponse>(`/api/index/pools?${buildQuery(params)}`),
+  }) =>
+    request<PoolIndexResponse>(
+      `/api/index/pools?${buildQuery({
+        q: params.q,
+        token_a: params.tokenA,
+        token_b: params.tokenB,
+        exact: params.exact ? 'true' : undefined,
+        hide_inactive: params.hideInactive ? 'true' : undefined,
+        protocol: params.protocol,
+        sort: params.sort,
+        order: params.order,
+        limit: params.limit,
+        offset: params.offset,
+      })}`,
+    ),
 };
 
-function buildQuery(params: Record<string, string | number | undefined>): string {
+type QueryValue = string | number | string[] | undefined;
+
+function buildQuery(params: Record<string, QueryValue>): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') usp.set(key, String(value));
+    if (value === undefined || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const v of value) usp.append(key, v);
+    } else {
+      usp.set(key, String(value));
+    }
   }
   return usp.toString();
 }

@@ -111,12 +111,19 @@ class _AssetAgg:
     decimals: int
     pools_count: int = 0
     total_tvl_usd: float = 0.0
+    # Soma do volume histórico (lifetime) das pools onde o ativo aparece --
+    # usado pelo filtro "ocultar sem atividade" nas páginas /assets e /pools
+    # (mesmo critério de "atividade" da busca ao vivo, ver
+    # local_db._MIN_ACTIVE_VOLUME_USD).
+    total_volume_usd: float = 0.0
     # símbolo da contraparte -> soma do TVL das pools com essa contraparte;
     # usado como aproximação de "com o que esse ativo mais negocia".
     counterpart_tvl: dict[str, float] = field(default_factory=dict)
 
 
-def _add_to_agg(agg: dict[str, _AssetAgg], chain: str, token: dict[str, Any], pool_tvl: float, counterpart_symbol: str) -> None:
+def _add_to_agg(
+    agg: dict[str, _AssetAgg], chain: str, token: dict[str, Any], pool_tvl: float, pool_volume: float, counterpart_symbol: str
+) -> None:
     asset_id = f"{chain}:{token['id'].lower()}"
     entry = agg.get(asset_id)
     if entry is None:
@@ -127,6 +134,7 @@ def _add_to_agg(agg: dict[str, _AssetAgg], chain: str, token: dict[str, Any], po
         agg[asset_id] = entry
     entry.pools_count += 1
     entry.total_tvl_usd += pool_tvl
+    entry.total_volume_usd += pool_volume
     entry.counterpart_tvl[counterpart_symbol] = entry.counterpart_tvl.get(counterpart_symbol, 0.0) + pool_tvl
 
 
@@ -185,8 +193,8 @@ async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
             if not pools_service._is_plausible_pool(tvl, fee_tier, volume):
                 continue
             pool_records.append(_build_pool_record(protocol, chain, row, fee_tier, tvl, volume))
-            _add_to_agg(asset_agg, chain, row["token0"], tvl, row["token1"]["symbol"])
-            _add_to_agg(asset_agg, chain, row["token1"], tvl, row["token0"]["symbol"])
+            _add_to_agg(asset_agg, chain, row["token0"], tvl, volume, row["token1"]["symbol"])
+            _add_to_agg(asset_agg, chain, row["token1"], tvl, volume, row["token0"]["symbol"])
 
     if len(protocol_errors) == len(protocols):
         raise GraphQueryError(f"Falha ao atualizar o índice em todos os protocolos: {protocol_errors}")
@@ -205,6 +213,7 @@ async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
                 category=token_categories.categorize(agg.symbol),
                 pools_count=agg.pools_count,
                 total_tvl_usd=agg.total_tvl_usd,
+                total_volume_usd=agg.total_volume_usd,
                 top_pairs=[{"symbol": s, "tvl_usd": v} for s, v in top_pairs],
             )
         )
