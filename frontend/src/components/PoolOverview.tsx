@@ -1,5 +1,5 @@
 import type { DayDataPoint, PoolDetail } from '../api/types';
-import { etherscanTokenUrl, formatDate, formatFeeTier, formatPercent, formatPrice, formatUsd, truncateAddress } from '../format';
+import { explorerTokenUrl, formatDate, formatFeeTier, formatPercent, formatPrice, formatUsd, truncateAddress } from '../format';
 import { PriceRangeBar } from './PriceRangeBar';
 
 interface IndicatorStats {
@@ -136,13 +136,13 @@ export function PoolOverview({ pool, indicators, indicatorsNote, history }: Prop
       <div className="token-addresses">
         <span className="muted">
           Contrato {pool.token0.symbol}:{' '}
-          <a href={etherscanTokenUrl(pool.token0.id)} target="_blank" rel="noopener noreferrer">
+          <a href={explorerTokenUrl(pool.token0.id, pool.protocol)} target="_blank" rel="noopener noreferrer">
             {truncateAddress(pool.token0.id)}
           </a>
         </span>
         <span className="muted">
           Contrato {pool.token1.symbol}:{' '}
-          <a href={etherscanTokenUrl(pool.token1.id)} target="_blank" rel="noopener noreferrer">
+          <a href={explorerTokenUrl(pool.token1.id, pool.protocol)} target="_blank" rel="noopener noreferrer">
             {truncateAddress(pool.token1.id)}
           </a>
         </span>

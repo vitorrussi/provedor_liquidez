@@ -6,10 +6,11 @@ sobre como mexer no código sem se machucar.
 
 ## O que é
 
-Ferramenta de apoio a decisão para provedores de liquidez na Uniswap: calcula Impermanent Loss, APR
-de taxas, volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço de
-um pool. Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm dos subgraphs
-oficiais da Uniswap v2, v3 e v4 via gateway do The Graph (um subgraph por versão/protocolo).
+Ferramenta de apoio a decisão para provedores de liquidez: calcula Impermanent Loss, APR de taxas,
+volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço de um pool.
+Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm dos subgraphs oficiais da
+Uniswap v2, v3 e v4 (Ethereum mainnet) e de um subgraph comunitário do Aerodrome Slipstream (Base),
+todos via gateway do The Graph (um subgraph por protocolo).
 
 ## TVL do subgraph pode estar errado -- por que existe verificação on-chain
 
@@ -53,10 +54,10 @@ e `graph_client.run_query(..., protocol=...)`). v2 é um AMM de produto constant
 `feesUSD` indexado — estimado como `volumeUSD * 0.003`) e tem queries GraphQL próprias
 (`_SEARCH_QUERY_V2`, `_BATCH_DAY_DATA_QUERY_V2`, `_POOL_DETAIL_QUERY_V2`).
 
-IDs de pool expostos ao frontend levam um prefixo de protocolo, ex: `v2:0xabc...`, `v4:0xabc...`
-(`_to_pool_summary`/`_split_pool_id` em `services/pools.py`) — sem isso não dá pra saber em qual dos
-três subgraphs buscar o detalhe de um pool a partir só do endereço. `client.ts` faz
-`encodeURIComponent` do id antes de montar a URL por causa do `:`.
+IDs de pool expostos ao frontend levam um prefixo de protocolo, ex: `v2:0xabc...`, `v4:0xabc...`,
+`aerodrome:0xabc...` (`_to_pool_summary`/`_split_pool_id` em `services/pools.py`) — sem isso não dá
+pra saber em qual dos quatro subgraphs buscar o detalhe de um pool a partir só do endereço.
+`client.ts` faz `encodeURIComponent` do id antes de montar a URL por causa do `:`.
 
 v2 não tem histórico OHLC indexado (`PairDayData` só tem reservas/volume, sem open/high/low/close) e
 não tem liquidez concentrada — por isso um pool v2 mostra uma versão simplificada no frontend: sem
@@ -69,9 +70,52 @@ essas telas para v2, mas é o comportamento se algo chamar na mão.
 O subgraph v4 foi observado respondendo em >20s pra termos de busca comuns (ex: "WETH") — bem mais
 lento que v3. Por isso `search_pools()` isola cada protocolo com `asyncio.gather(..., return_exceptions=True)`
 e usa um timeout mais curto (`_SEARCH_TIMEOUT = 10.0`) só pras buscas: se um protocolo falhar ou
-estourar o timeout, os outros dois ainda aparecem em vez de derrubar a busca inteira. Isso é
-intencional, não um bug — se notar resultados de v4 faltando ocasionalmente numa busca por termo
-muito comum, é essa degradação graciosa agindo, não um erro silencioso.
+estourar o timeout, os outros ainda aparecem em vez de derrubar a busca inteira. Isso é intencional,
+não um bug — se notar resultados de v4 (ou Aerodrome) faltando ocasionalmente numa busca por termo
+muito comum, é essa degradação graciosa agindo, não um erro silencioso. Com 4 protocolos em vez de 3,
+uma busca completa (com enriquecimento de volume/APR) pode levar ~10-15s.
+
+## Aerodrome Slipstream (Base)
+
+Aerodrome Slipstream é um fork da Uniswap v3 que roda na **Base** (chain id 8453), não em Ethereum
+mainnet — por isso é tratado como um quarto protocolo (`protocol="aerodrome"`), não como só mais uma
+versão. Schema do subgraph é praticamente idêntico ao de v3/v4 (`Pool`/`PoolDayData`, `feeTier` em
+vez de `tickSpacing` -- confirmado por introspecção real em 2026-09-09, apesar da Slipstream permitir
+taxa por pool configurável via governança, os valores observados seguem a mesma convenção de
+centésimos de bip da Uniswap), então reaproveita o mesmo código de `_get_pool_detail_v3v4`/
+`_search_v3v4`/`_related_v3v4` que v3/v4 -- só muda qual subgraph é consultado.
+
+**O subgraph usado (`GENunSHWLBXm59mBSgPzQ8metBEp9YDfdqwFr91Av1UM`, "Aerodrome Base Full") não é
+publicado/mantido pela Aerodrome** -- é um subgraph comunitário de terceiros, sem SLA. Verificado em
+2026-09-09: `hasIndexingErrors: false`, bloco recente, e o `factories.id` retornado bate com o
+CLFactory real da Aerodrome on-chain (`0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a`, confirmado via
+BaseScan) -- então é real e consistente, mas pode ficar desatualizado ou sair do ar sem aviso, já que
+não tem o mesmo tipo de garantia dos subgraphs oficiais da Uniswap. Se ficar instável, troque
+`AERODROME_SLIPSTREAM_SUBGRAPH_ID` no `.env` (outros candidatos encontrados no Graph Explorer na
+época — `base-v3-aerodrome` e afins — estavam com indexação quebrada ou eram subgraphs de escopo
+estreito demais, tipo só transações de usuário; não são substitutos diretos sem reavaliar).
+
+**Chain diferente tem implicações que já morderam em outros pontos do código, não só na query
+GraphQL:**
+- A verificação de TVL on-chain (ver seção acima) usa `_rpc_url_for_protocol()` em
+  `services/pools.py`, que escolhe `BASE_RPC_URL` para Aerodrome e `ETH_RPC_URL` para v2/v3/v4 --
+  **nunca compartilham o mesmo RPC**. Chamar `balanceOf` num RPC da chain errada não dá erro, só
+  devolve saldo zerado (o contrato simplesmente não existe lá), o que produziria um TVL de $0 com
+  `tvl_verified_onchain=true` -- silenciosamente pior que o bug que essa verificação existe pra
+  corrigir. Por isso `onchain_client.get_erc20_balance` não tem RPC default nenhum: `rpc_url` é
+  sempre explícito no chamador, de propósito, pra esse tipo de engano não poder acontecer sem uma
+  mudança visível no código.
+- Links de contrato de token usam `explorerTokenUrl(address, protocol)` (`format.ts`) -- basescan.org
+  para Aerodrome, etherscan.io para os demais. Endereço igual em duas chains é um contrato
+  completamente diferente; nunca monte esse link sem levar o protocolo em conta.
+- `get_related_pools` só cruza protocolos da mesma chain (`_PROTOCOL_CHAIN` em `services/pools.py`):
+  um pool Aerodrome só mostra outras pools Aerodrome do mesmo par (outras fee tiers), nunca pools
+  Uniswap mainnet -- os endereços de token nunca bateriam entre chains mesmo que tentasse (WETH tem
+  endereço diferente em cada chain), então cruzar seria só gasto de quota à toa.
+- A verificação on-chain revelou, num teste real, uma divergência grande entre o
+  `totalValueLockedUSD` do subgraph Aerodrome e o saldo real (~$67M vs ~$10M num pool WETH/USDC) --
+  o mesmo tipo de bug de tracking incremental documentado na seção acima para a Uniswap. Reforça que
+  a verificação on-chain não é só teatro pra esse subgraph específico, é necessária de verdade.
 
 ## Indicadores 7d/30d, pools relacionadas e o sentinel de taxa dinâmica da v4
 
@@ -81,11 +125,13 @@ endpoint `/api/pools/{id}/indicators` também calcula `fee_apr_full_range_7d`/`a
 reaproveitando o mesmo `daily` (últimos 30 dias) já buscado — sem chamada extra ao gateway.
 
 `GET /api/pools/{id}/related` (`services/pools.py::get_related_pools`) busca outras pools/pairs do
-mesmo par de tokens nos três protocolos (outras fee tiers em v3/v4, ou a versão v2/v3/v4 do mesmo
-par), filtrando TVL < $1k (dust/pools esquecidas — o APR calculado sobre um TVL desprezível vira um
-número sem sentido, tipo >1000000%) e limitando a 6 resultados por TVL. Usa `token0: $addr`/`token1:
-$addr` (endereço direto, não a busca por símbolo de `_SEARCH_QUERY`) — a ordem token0/token1 é
-canônica (endereço menor primeiro) em todo deployment Uniswap, então não precisa inverter.
+mesmo par de tokens nos protocolos da mesma chain (outras fee tiers em v3/v4, a versão v2/v3/v4 do
+mesmo par, ou outras fee tiers/tick spacings em Aerodrome -- ver seção "Aerodrome Slipstream (Base)"
+sobre por que não cruza chains), filtrando TVL < $1k (dust/pools esquecidas — o APR calculado sobre
+um TVL desprezível vira um número sem sentido, tipo >1000000%) e limitando a 6 resultados por TVL.
+Usa `token0: $addr`/`token1: $addr` (endereço direto, não a busca por símbolo de `_SEARCH_QUERY`) — a
+ordem token0/token1 é canônica (endereço menor primeiro) em todo deployment Uniswap v3-like, então
+não precisa inverter.
 
 **v4 tem um valor sentinel pra `feeTier`**: `8388608` (`0x800000`) significa "taxa dinâmica, definida
 por um hook" — não é uma taxa fixa de verdade. `formatFeeTier` (frontend) trata esse caso

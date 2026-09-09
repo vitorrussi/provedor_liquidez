@@ -7,13 +7,19 @@ totalValueLockedUSD do subgraph comunitário da Uniswap pode divergir bastante
 do saldo real do contrato (bug de tracking incremental já documentado, ver
 CLAUDE.md) -- comparando com o saldo on-chain de verdade a gente corrige isso
 em vez de confiar cegamente no número do subgraph.
+
+`rpc_url` é sempre explícito no chamador (nunca lido daqui de dentro) porque
+pools de protocolos diferentes vivem em chains diferentes (v2/v3/v4 em
+Ethereum mainnet, Aerodrome Slipstream na Base) -- ver
+`services/pools.py::_rpc_url_for_protocol`. Chamar com o RPC errado não dá
+erro (o eth_call simplesmente não acha o contrato), só devolve um saldo
+zerado -- por isso não existe um default aqui que possa mascarar esse tipo de
+engano.
 """
 
 from __future__ import annotations
 
 import httpx
-
-from .config import get_settings
 
 _BALANCE_OF_SELECTOR = "0x70a08231"  # balanceOf(address)
 
@@ -22,10 +28,9 @@ class OnchainQueryError(RuntimeError):
     pass
 
 
-async def get_erc20_balance(token_address: str, holder_address: str) -> int:
+async def get_erc20_balance(token_address: str, holder_address: str, rpc_url: str) -> int:
     """Saldo bruto (sem ajuste de decimais) de `token_address` na carteira
-    `holder_address`, via eth_call direto contra o RPC configurado."""
-    settings = get_settings()
+    `holder_address`, via eth_call direto contra `rpc_url`."""
     padded_holder = holder_address.lower().removeprefix("0x").zfill(64)
     payload = {
         "jsonrpc": "2.0",
@@ -36,7 +41,7 @@ async def get_erc20_balance(token_address: str, holder_address: str) -> int:
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            response = await client.post(settings.eth_rpc_url, json=payload)
+            response = await client.post(rpc_url, json=payload)
             response.raise_for_status()
             result = response.json()
     except httpx.HTTPError as exc:

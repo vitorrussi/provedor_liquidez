@@ -5,7 +5,7 @@ export interface Token {
   decimals: number;
 }
 
-export type Protocol = 'v2' | 'v3' | 'v4';
+export type Protocol = 'v2' | 'v3' | 'v4' | 'aerodrome';
 
 export interface PoolSummary {
   id: string;

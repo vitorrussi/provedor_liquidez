@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from .. import graph_client, indicators, onchain_client
+from ..config import get_settings
 from ..graph_client import GraphQueryError
 from ..onchain_client import OnchainQueryError
 from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Token
@@ -14,6 +15,21 @@ from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Toke
 # como volume * essa taxa fixa. Ver docstring de _to_pool_summary_v2.
 V2_FEE_TIER = 3000  # unidades de feeTier da v3 (1e-6): 3000 == 0,30%
 V2_FEE_RATE = 0.003
+
+# Qual chain cada protocolo vive -- v2/v3/v4 são todos Ethereum mainnet
+# (mesmos endereços de token, mesmo RPC de verificação on-chain); Aerodrome
+# Slipstream é Base mainnet, uma chain totalmente separada (endereços de
+# token diferentes, mesmo pra "o mesmo" token como WETH). Usado para (a)
+# escolher o RPC certo em _rpc_url_for_protocol -- usar o RPC errado não dá
+# erro, só devolve saldo zerado, então isso importa de verdade -- e (b) não
+# misturar protocolos de chains diferentes em get_related_pools (endereços
+# nunca vão bater entre chains, então seria só gasto de quota à toa).
+_PROTOCOL_CHAIN = {"v2": "mainnet", "v3": "mainnet", "v4": "mainnet", "aerodrome": "base"}
+
+
+def _rpc_url_for_protocol(protocol: str) -> str:
+    settings = get_settings()
+    return settings.base_rpc_url if _PROTOCOL_CHAIN[protocol] == "base" else settings.eth_rpc_url
 
 # Timeout mais curto pras 3 buscas em paralelo -- o subgraph v4 foi observado
 # respondendo em >20s pra termos comuns ("WETH"); é melhor falhar rápido nesse
@@ -281,7 +297,7 @@ def _split_pool_id(pool_id: str) -> tuple[str, str]:
     assume v3 (compatibilidade com IDs antigos)."""
     if ":" in pool_id:
         protocol, raw = pool_id.split(":", 1)
-        if protocol in ("v2", "v3", "v4"):
+        if protocol in ("v2", "v3", "v4", "aerodrome"):
             return protocol, raw.lower()
     return "v3", pool_id.lower()
 
@@ -440,10 +456,11 @@ async def _search_v2(search: str, limit: int) -> list[PoolSummary]:
 
 
 async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
-    """Busca nos três subgraphs (v3, v4, v2) em paralelo e mescla por TVL.
+    """Busca nos quatro subgraphs (v3, v4, v2, Aerodrome Slipstream) em
+    paralelo e mescla por TVL.
 
-    Custo em chamadas ao gateway: 3 de busca + até 2 de enriquecimento (dados
-    diários) por protocolo com resultados = até 9 no total por busca (era 3
+    Custo em chamadas ao gateway: 4 de busca + até 2 de enriquecimento (dados
+    diários) por protocolo com resultados = até 12 no total por busca (era 3
     quando só existia v3).
 
     Cada protocolo é isolado com `return_exceptions=True`: o subgraph v4, em
@@ -455,6 +472,7 @@ async def search_pools(search: str, limit: int = 15) -> list[PoolSummary]:
         _search_v3v4("v3", search, limit),
         _search_v3v4("v4", search, limit),
         _search_v2(search, limit),
+        _search_v3v4("aerodrome", search, limit),
         return_exceptions=True,
     )
     results: list[PoolSummary] = []
@@ -505,6 +523,7 @@ async def _verify_tvl_onchain(
     token0_derived_eth: float,
     token1_derived_eth: float,
     eth_price_usd: float,
+    rpc_url: str,
 ) -> tuple[float, bool]:
     """Recalcula o TVL a partir do saldo real on-chain dos dois tokens no
     contrato do pool (balanceOf), em vez de confiar no totalValueLockedUSD/
@@ -520,8 +539,8 @@ async def _verify_tvl_onchain(
     """
     try:
         balance0_raw, balance1_raw = await asyncio.gather(
-            onchain_client.get_erc20_balance(token0.id, pool_address),
-            onchain_client.get_erc20_balance(token1.id, pool_address),
+            onchain_client.get_erc20_balance(token0.id, pool_address, rpc_url),
+            onchain_client.get_erc20_balance(token1.id, pool_address, rpc_url),
         )
     except OnchainQueryError:
         return 0.0, False
@@ -563,6 +582,7 @@ async def _get_pool_detail_v3v4(protocol: str, raw_id: str) -> PoolDetail | None
             float(raw["token0"]["derivedETH"]),
             float(raw["token1"]["derivedETH"]),
             float(bundle["ethPriceUSD"]),
+            _rpc_url_for_protocol(protocol),
         )
         if verified:
             pool.total_value_locked_usd = tvl_onchain
@@ -602,6 +622,7 @@ async def _get_pool_detail_v2(raw_id: str) -> PoolDetail | None:
             float(raw["token0"]["derivedETH"]),
             float(raw["token1"]["derivedETH"]),
             float(bundle["ethPrice"]),
+            _rpc_url_for_protocol("v2"),
         )
         if verified:
             tvl = tvl_onchain
@@ -692,10 +713,14 @@ async def _related_v2(token0_addr: str, token1_addr: str) -> list[PoolSummary]:
 
 
 async def get_related_pools(pool_id: str) -> list[PoolSummary]:
-    """Outras pools/pairs do mesmo par de tokens, nos três protocolos --
-    outras fee tiers em v3/v4, ou a versão v2/v3/v4 do mesmo par. Útil pra
-    comparar onde a liquidez desse par está concentrada antes de escolher
-    onde entrar. Exclui a própria pool da lista, ordena por TVL.
+    """Outras pools/pairs do mesmo par de tokens, nos protocolos que vivem na
+    mesma chain do pool de origem -- outras fee tiers em v3/v4, a versão
+    v2/v3/v4 do mesmo par, ou outras fee tiers/tick spacings em Aerodrome
+    Slipstream. Não mistura protocolos de chains diferentes (v2/v3/v4 são
+    Ethereum mainnet, Aerodrome é Base) -- os endereços de token nunca batem
+    entre chains, então consultar os subgraphs da chain errada só gastaria
+    quota à toa sem nunca achar nada. Exclui a própria pool da lista, ordena
+    por TVL.
     """
     pool = await get_pool_detail(pool_id)
     if pool is None:
@@ -703,11 +728,15 @@ async def get_related_pools(pool_id: str) -> list[PoolSummary]:
 
     token0_addr = pool.token0.id
     token1_addr = pool.token1.id
+    same_chain_protocols = [p for p, chain in _PROTOCOL_CHAIN.items() if chain == _PROTOCOL_CHAIN[pool.protocol]]
 
     raw_results = await asyncio.gather(
-        _related_v3v4("v3", token0_addr, token1_addr),
-        _related_v3v4("v4", token0_addr, token1_addr),
-        _related_v2(token0_addr, token1_addr),
+        *[
+            _related_v2(token0_addr, token1_addr)
+            if protocol == "v2"
+            else _related_v3v4(protocol, token0_addr, token1_addr)
+            for protocol in same_chain_protocols
+        ],
         return_exceptions=True,
     )
     results: list[PoolSummary] = [p for r in raw_results if not isinstance(r, BaseException) for p in r]

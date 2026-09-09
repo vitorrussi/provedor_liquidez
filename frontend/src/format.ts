@@ -64,7 +64,8 @@ export function formatFeeTier(feeTier: number): string {
   return `${(feeTier / 10_000).toFixed(2)}%`;
 }
 
-export function protocolLabel(protocol: 'v2' | 'v3' | 'v4'): string {
+export function protocolLabel(protocol: 'v2' | 'v3' | 'v4' | 'aerodrome'): string {
+  if (protocol === 'aerodrome') return 'Aerodrome Slipstream';
   return `Uniswap ${protocol}`;
 }
 
@@ -77,6 +78,10 @@ export function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function etherscanTokenUrl(address: string): string {
-  return `https://etherscan.io/token/${address}`;
+// Aerodrome Slipstream roda na Base, não em Ethereum mainnet -- o mesmo
+// endereço de contrato significa coisas diferentes em cada chain, então o
+// link do explorador tem que seguir o protocolo, não ser sempre etherscan.
+export function explorerTokenUrl(address: string, protocol: 'v2' | 'v3' | 'v4' | 'aerodrome'): string {
+  const base = protocol === 'aerodrome' ? 'https://basescan.org' : 'https://etherscan.io';
+  return `${base}/token/${address}`;
 }

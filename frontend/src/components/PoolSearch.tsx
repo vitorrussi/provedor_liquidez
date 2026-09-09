@@ -140,11 +140,12 @@ export function PoolSearch() {
       {results.length > 0 && (
         <>
           <p className="footnote pool-search__hint">
-            Busca em Uniswap v2, v3 e v4. A busca casa qualquer token cujo símbolo ou nome contenha o
-            termo. O mesmo par pode aparecer mais de uma vez: em v3/v4 cada taxa (0,01% / 0,05% / 0,30%
-            / 1%) é um pool com contrato e liquidez próprios; em v2 a taxa é sempre fixa em 0,30% (não
-            existe conceito de faixa de taxa nem de liquidez concentrada). "Vol. 30 dias" e "APR da
-            pool" são estimados a partir dos últimos ~30 dias de histórico — a Uniswap não expõe
+            Busca em Uniswap v2, v3 e v4, e em Aerodrome Slipstream (Base). A busca casa qualquer token
+            cujo símbolo ou nome contenha o termo. O mesmo par pode aparecer mais de uma vez: em
+            v3/v4/Aerodrome cada taxa (0,01% / 0,05% / 0,30% / 1%) é um pool com contrato e liquidez
+            próprios; em v2 a taxa é sempre fixa em 0,30% (não existe conceito de faixa de taxa nem de
+            liquidez concentrada). "Vol. 30 dias" e "APR da pool" são estimados a partir dos últimos ~30
+            dias de histórico — a Uniswap não expõe
             separadamente quanto da taxa vai para o LP e quanto vai para o protocolo, então o que vemos
             é sempre a taxa total. Para v2, como o subgraph não indexa taxas separadamente, elas são
             estimadas como 0,30% do volume diário. Ao abrir um pool v2, a página mostra uma versão

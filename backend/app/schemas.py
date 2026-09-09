@@ -10,7 +10,7 @@ class Token(BaseModel):
 
 class PoolSummary(BaseModel):
     id: str
-    protocol: str = "v3"  # "v2" | "v3" | "v4"
+    protocol: str = "v3"  # "v2" | "v3" | "v4" | "aerodrome"
     token0: Token
     token1: Token
     fee_tier: int
