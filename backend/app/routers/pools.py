@@ -56,9 +56,18 @@ async def get_pool_indicators(pool_id: str):
     if len(daily) < 2:
         raise HTTPException(status_code=422, detail="Histórico insuficiente para calcular indicadores")
 
-    fees_30d = sum(d.fees_usd for d in daily)
-    fee_apr = indicators.fee_apr_full_range(fees_30d, pool.total_value_locked_usd, period_days=len(daily))
-    closes = [d.close for d in daily]
-    vol = indicators.annualized_volatility(closes)
+    try:
+        fees_30d = sum(d.fees_usd for d in daily)
+        fee_apr = indicators.fee_apr_full_range(fees_30d, pool.total_value_locked_usd, period_days=len(daily))
+        closes = [d.close for d in daily]
+        vol = indicators.annualized_volatility(closes)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Não foi possível calcular indicadores para este pool — dados insuficientes ou "
+                f"degenerados (ex: sem preço ou sem liquidez válida): {exc}"
+            ),
+        ) from exc
 
     return PoolIndicatorsResponse(pool=pool, fee_apr_full_range_30d=fee_apr, annualized_volatility_30d=vol)

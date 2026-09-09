@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { api, ApiError } from './api/client';
 import type { DayDataPoint, PoolIndicatorsResponse, PoolSummary } from './api/types';
@@ -15,6 +15,7 @@ function App() {
   const [history, setHistory] = useState<DayDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!selectedPool) return;
@@ -23,6 +24,9 @@ function App() {
     setLoading(true);
     setError(null);
     setIndicators(null);
+    // O clique pode ter sido numa linha bem abaixo, no fim de uma lista longa de
+    // resultados -- rola até o status pra deixar claro que algo aconteceu.
+    statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     Promise.all([api.getPoolIndicators(selectedPool.id), api.getDailyHistory(selectedPool.id, 30)])
       .then(([ind, hist]) => {
@@ -53,8 +57,10 @@ function App() {
       <main className="app__main">
         <PoolSearch onSelect={setSelectedPool} />
 
-        {loading && <p className="muted">Carregando dados do pool...</p>}
-        {error && <p className="error-text">{error}</p>}
+        <div ref={statusRef}>
+          {loading && <p className="status-box muted">Carregando dados do pool...</p>}
+          {error && <p className="status-box status-box--error error-text">{error}</p>}
+        </div>
 
         {indicators && !loading && (
           <div className="dashboard">

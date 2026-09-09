@@ -196,7 +196,9 @@ def annualized_volatility(prices: list[float], periods_per_year: float = 365.0) 
     """
     if len(prices) < 2:
         raise ValueError("são necessários ao menos 2 preços")
-    log_returns = [math.log(prices[i] / prices[i - 1]) for i in range(1, len(prices)) if prices[i - 1] > 0]
+    log_returns = [
+        math.log(prices[i] / prices[i - 1]) for i in range(1, len(prices)) if prices[i - 1] > 0 and prices[i] > 0
+    ]
     if len(log_returns) < 2:
         raise ValueError("dados insuficientes para calcular volatilidade")
     mean = sum(log_returns) / len(log_returns)
