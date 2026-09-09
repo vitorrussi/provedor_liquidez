@@ -20,7 +20,9 @@ BACKEND_LOG="$RUN_DIR/backend.log"
 FRONTEND_LOG="$RUN_DIR/frontend.log"
 
 NODE_VERSION="${NODE_VERSION:-lts/*}"
-BACKEND_PORT="${BACKEND_PORT:-8000}"
+# 8000 costuma estar ocupada nesta máquina por um container Docker
+# (docker-proxy) que não é deste projeto -- 8787 evita a colisão.
+BACKEND_PORT="${BACKEND_PORT:-8787}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 
 is_running() {

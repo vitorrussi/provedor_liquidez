@@ -28,7 +28,7 @@ export function PoolOverview({ data }: Props) {
         </div>
         <div className="stat">
           <span className="stat__label">
-            Preço ({pool.token0.symbol} em {pool.token1.symbol})
+            Preço ({pool.token1.symbol} em {pool.token0.symbol})
           </span>
           <span className="stat__value">{formatPrice(pool.token0_price)}</span>
         </div>

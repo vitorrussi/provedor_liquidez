@@ -42,7 +42,7 @@ export function ImpermanentLossCalculator({ pool }: Props) {
         <h3>Calculadora de Impermanent Loss</h3>
       </div>
       <p className="muted">
-        Preço = {pool.token0.symbol} em {pool.token1.symbol}. Preço atual: {formatPrice(currentPrice)}
+        Preço = {pool.token1.symbol} em {pool.token0.symbol}. Preço atual: {formatPrice(currentPrice)}
       </p>
 
       <form onSubmit={handleCalculate} className="form-grid">

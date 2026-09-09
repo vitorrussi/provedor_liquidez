@@ -32,14 +32,19 @@ tende a [0, ∞).
 Depois de instalar as dependências (seções abaixo), dá pra subir/derrubar os dois servidores juntos:
 
 ```bash
-scripts/dev.sh start     # sobe backend (porta 8000) + frontend (porta 5173) em background
+scripts/dev.sh start     # sobe backend (porta 8787) + frontend (porta 5173) em background
 scripts/dev.sh status
 scripts/dev.sh logs      # tail dos dois logs (Ctrl-C só sai do tail, servidores continuam)
 scripts/dev.sh stop
 scripts/dev.sh restart
 ```
 
-Portas customizáveis via env var, se 8000/5173 estiverem ocupadas: `BACKEND_PORT=8787 FRONTEND_PORT=5174 scripts/dev.sh start`.
+Logs ficam em `.dev/backend.log` e `.dev/frontend.log`. Note que a porta padrão do backend é
+**8787**, não 8000 — nesta config a 8000 costuma estar ocupada por outro serviço local (ex: um
+container Docker), e se o backend não conseguir subir nela, requisições do navegador batem em outro
+processo sem CORS configurado, dando um erro de CORS enganoso no console.
+
+Portas customizáveis via env var, se 8787/5173 estiverem ocupadas: `BACKEND_PORT=8888 FRONTEND_PORT=5174 scripts/dev.sh start`.
 
 ## Backend
 
@@ -52,7 +57,7 @@ pip install -r requirements.txt  # ou: uv pip install -r requirements.txt
 cp .env.example .env
 # edite .env e cole sua GRAPH_API_KEY
 
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8787
 ```
 
 Rodar os testes (não precisa de API key — são só matemática pura):
@@ -61,7 +66,7 @@ Rodar os testes (não precisa de API key — são só matemática pura):
 pytest
 ```
 
-A API sobe em `http://localhost:8000`. Docs interativas em `http://localhost:8000/docs`.
+A API sobe em `http://localhost:8787`. Docs interativas em `http://localhost:8787/docs`.
 
 ## Frontend
 
@@ -71,7 +76,7 @@ npm install
 npm run dev
 ```
 
-Abre em `http://localhost:5173`. Por padrão aponta para o backend em `http://localhost:8000` — se
+Abre em `http://localhost:5173`. Por padrão aponta para o backend em `http://localhost:8787` — se
 você rodar o backend em outra porta, crie `frontend/.env.local` com:
 
 ```
