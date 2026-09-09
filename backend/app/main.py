@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routers import indicators, pools
+from .schemas import GraphUsageResponse
+from .usage_tracker import get_usage
 
 app = FastAPI(title="Provedor de Liquidez API", version="0.1.0")
 
@@ -21,3 +23,9 @@ app.include_router(indicators.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/graph-usage", response_model=GraphUsageResponse)
+def graph_usage():
+    stats = get_usage()
+    return GraphUsageResponse(month=stats.month, used=stats.used, limit=stats.limit, remaining=stats.remaining)

@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from . import usage_tracker
 from .config import get_settings
 
 
@@ -31,6 +32,7 @@ async def run_query(query: str, variables: dict[str, Any] | None = None) -> dict
             settings.graph_gateway_url,
             json={"query": query, "variables": variables or {}},
         )
+        usage_tracker.record_request()
         response.raise_for_status()
         payload = response.json()
 

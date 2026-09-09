@@ -275,3 +275,16 @@ body {
 .form-grid__submit {
   grid-column: 1 / -1;
 }
+
+/* Usage badge -- discreto de propósito */
+
+.usage-badge {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}

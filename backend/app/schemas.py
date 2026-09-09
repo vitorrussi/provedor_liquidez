@@ -81,3 +81,10 @@ class PoolIndicatorsResponse(BaseModel):
     pool: PoolDetail
     fee_apr_full_range_30d: float
     annualized_volatility_30d: float
+
+
+class GraphUsageResponse(BaseModel):
+    month: str
+    used: int
+    limit: int
+    remaining: int

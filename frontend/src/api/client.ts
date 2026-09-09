@@ -1,5 +1,6 @@
 import type {
   DayDataPoint,
+  GraphUsageResponse,
   HourDataPoint,
   ImpermanentLossRequest,
   ImpermanentLossResponse,
@@ -58,6 +59,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  getGraphUsage: () => request<GraphUsageResponse>('/api/graph-usage'),
 };
 
 export { ApiError };

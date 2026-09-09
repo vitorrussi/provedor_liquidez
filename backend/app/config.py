@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Plano free do Subgraph Studio: 100k queries/mês. Usado só para estimar
+    # quanto resta -- a fonte de verdade é o dashboard do Studio.
+    graph_monthly_query_limit: int = 100_000
+
     @property
     def graph_gateway_url(self) -> str:
         return f"https://gateway.thegraph.com/api/{self.graph_api_key}/subgraphs/id/{self.uniswap_v3_subgraph_id}"

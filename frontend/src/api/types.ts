@@ -79,3 +79,10 @@ export interface RangeSimulationResponse {
   sample_count: number;
   annualized_volatility: number;
 }
+
+export interface GraphUsageResponse {
+  month: string;
+  used: number;
+  limit: number;
+  remaining: number;
+}

@@ -7,6 +7,7 @@ import { PoolOverview } from './components/PoolOverview';
 import { PoolSearch } from './components/PoolSearch';
 import { PriceChart } from './components/PriceChart';
 import { RangeSimulator } from './components/RangeSimulator';
+import { UsageBadge } from './components/UsageBadge';
 
 function App() {
   const [selectedPool, setSelectedPool] = useState<PoolSummary | null>(null);
@@ -79,6 +80,8 @@ function App() {
           investimento — DeFi envolve risco real de perda de capital.
         </p>
       </footer>
+
+      <UsageBadge />
     </div>
   );
 }
