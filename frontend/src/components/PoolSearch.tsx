@@ -3,8 +3,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import type { AssetIndexRow, Protocol, PoolSummary } from '../api/types';
 import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
+import { RangeFilter } from './RangeFilter';
 import { SortableHeader } from './SortableHeader';
 import { TokenMultiSelect } from './TokenMultiSelect';
+
+// String vazia == sem filtro -- ver mesma função em PoolsIndexPage.tsx.
+function toFilterNumber(value: string): number | undefined {
+  return value.trim() === '' ? undefined : Number(value);
+}
 
 type SortKey = 'pair' | 'tvl' | 'vol1d' | 'vol30d' | 'vol1dTvl' | 'apr' | 'volume';
 type SortDirection = 'asc' | 'desc';
@@ -49,6 +55,14 @@ export function PoolSearch() {
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
   const [minTvl, setMinTvl] = useState('');
+  const [minVol1d, setMinVol1d] = useState('');
+  const [maxVol1d, setMaxVol1d] = useState('');
+  const [minVol30d, setMinVol30d] = useState('');
+  const [maxVol30d, setMaxVol30d] = useState('');
+  const [minVol1dTvl, setMinVol1dTvl] = useState('');
+  const [maxVol1dTvl, setMaxVol1dTvl] = useState('');
+  const [minApr, setMinApr] = useState('');
+  const [maxApr, setMaxApr] = useState('');
   const [selectedProtocols, setSelectedProtocols] = useState<Protocol[]>([]);
   const [resultLimit, setResultLimit] = useState(50);
   const [searchTrigger, setSearchTrigger] = useState(0);
@@ -111,6 +125,16 @@ export function PoolSearch() {
         minTvlUsd: minTvl ? Number(minTvl) : undefined,
         protocols: selectedProtocols.length > 0 ? selectedProtocols : undefined,
         limit: resultLimit,
+        minVolume1dUsd: toFilterNumber(minVol1d),
+        maxVolume1dUsd: toFilterNumber(maxVol1d),
+        minVolume30dUsd: toFilterNumber(minVol30d),
+        maxVolume30dUsd: toFilterNumber(maxVol30d),
+        minVolume1dOverTvl: toFilterNumber(minVol1dTvl),
+        maxVolume1dOverTvl: toFilterNumber(maxVol1dTvl),
+        // APR digitado em % (ex: "5" = 5%) -- convertido pra fração, mesma
+        // convenção de PoolsIndexPage.tsx.
+        minAprPool30d: toFilterNumber(minApr) !== undefined ? Number(minApr) / 100 : undefined,
+        maxAprPool30d: toFilterNumber(maxApr) !== undefined ? Number(maxApr) / 100 : undefined,
       })
       .then((pools) => {
         if (cancelled) return;
@@ -296,6 +320,46 @@ export function PoolSearch() {
           </div>
 
           <div className="advanced-filters__row">
+            <RangeFilter
+              label="Volume 1d (USD)"
+              min={minVol1d}
+              max={maxVol1d}
+              onMinChange={setMinVol1d}
+              onMaxChange={setMaxVol1d}
+            />
+            <RangeFilter
+              label="Volume 30d (USD)"
+              min={minVol30d}
+              max={maxVol30d}
+              onMinChange={setMinVol30d}
+              onMaxChange={setMaxVol30d}
+            />
+            <RangeFilter
+              label="Vol. 1d/TVL"
+              title="Volume de 1 dia dividido pelo TVL"
+              min={minVol1dTvl}
+              max={maxVol1dTvl}
+              onMinChange={setMinVol1dTvl}
+              onMaxChange={setMaxVol1dTvl}
+            />
+            <RangeFilter
+              label="APR da pool (%)"
+              title="APR de taxas full-range dos últimos ~30 dias"
+              min={minApr}
+              max={maxApr}
+              onMinChange={setMinApr}
+              onMaxChange={setMaxApr}
+            />
+          </div>
+          {(minVol1d || maxVol1d || minVol30d || maxVol30d || minVol1dTvl || maxVol1dTvl || minApr || maxApr) && (
+            <p className="footnote advanced-filters__hint">
+              Esses quatro filtros são aplicados depois de já ter buscado (dependem de dados históricos por pool) --
+              com algum preenchido, a busca amplia o conjunto de candidatos além do "Nº de resultados" antes de
+              filtrar, mas ainda assim pode não pegar pools de TVL bem baixo que também passariam no filtro.
+            </p>
+          )}
+
+          <div className="advanced-filters__row">
             <span className="advanced-filters__label">Protocolos</span>
             <div className="advanced-filters__protocols">
               {ALL_PROTOCOLS.map((p) => (
@@ -321,7 +385,9 @@ export function PoolSearch() {
       {error && <p className="error-text">{error}</p>}
 
       {searched && !loading && results.length === 0 && !error && (
-        <p className="muted">Nenhum pool encontrado para "{query}".</p>
+        <p className="muted">
+          {query.trim() ? `Nenhum pool encontrado para "${query}".` : 'Nenhum pool encontrado para esses filtros.'}
+        </p>
       )}
 
       {results.length > 0 && (

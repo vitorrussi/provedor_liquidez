@@ -624,6 +624,61 @@ async def _search_v2(
     return results
 
 
+# Quando algum filtro numérico por janela (volume 1d/30d, Vol. 1d/TVL, APR)
+# está ativo, a busca precisa enriquecer (poolDayData) um conjunto de
+# candidatos maior que `limit` ANTES de filtrar -- senão "top N por TVL,
+# filtrado depois" pode devolver uma lista vazia mesmo havendo pools que
+# passariam no filtro só que fora do top N original. Por isso o corte
+# pré-enriquecimento usa `limit + _FILTERED_CANDIDATE_EXTRA`, não só `limit`
+# -- tem que ser uma soma, não um piso tipo `max(limit, N)`: com `limit=100`
+# (a opção "Nº de resultados" mais alta da UI) um piso de 60 não faria nada
+# (100 já é >= 60), deixando o `resultLimit=100` sem nenhum alargamento real.
+#
+# `_fetch_recent_day_data_batch` é chamada uma vez POR PROTOCOLO, só com os
+# candidatos daquele protocolo (ver `by_protocol` abaixo), e pagina até 2000
+# linhas (2 páginas de 1000, ver seu docstring) -- com até 30 dias por pool,
+# isso cobre com folga até ~66 candidatos NUM SÓ protocolo. No pior caso (uma
+# busca cujos resultados ficam concentrados num único protocolo, ex: filtro
+# de protocolo == v3), o batch desse protocolo pode ter até
+# `limit + _FILTERED_CANDIDATE_EXTRA` candidatos -- com o `limit` máximo da
+# UI (100) mais o alargamento (60) isso passa dos ~66 seguros, e candidatos
+# "no fim da fila" (a ordem das linhas devolvidas pelo subgraph não agrupa
+# por pool) podem ficar com o histórico incompleto e aparecer com
+# volume/APR zerado mesmo tendo atividade real -- degradação aceitável
+# (mesmo espírito das outras isolações de falha por protocolo desta função),
+# mas documentado aqui pra não ser confundido com um bug se notado.
+_FILTERED_CANDIDATE_EXTRA = 60
+
+
+@dataclass(frozen=True)
+class _NumericFilters:
+    min_volume_1d_usd: float | None = None
+    max_volume_1d_usd: float | None = None
+    min_volume_30d_usd: float | None = None
+    max_volume_30d_usd: float | None = None
+    min_volume_1d_over_tvl: float | None = None
+    max_volume_1d_over_tvl: float | None = None
+    min_apr_pool_30d: float | None = None
+    max_apr_pool_30d: float | None = None
+
+    def is_active(self) -> bool:
+        return any(v is not None for v in vars(self).values())
+
+    def pool_passes(self, pool: PoolSummary) -> bool:
+        checks = (
+            (self.min_volume_1d_usd, self.max_volume_1d_usd, pool.volume_1d_usd),
+            (self.min_volume_30d_usd, self.max_volume_30d_usd, pool.volume_30d_usd),
+            (self.min_volume_1d_over_tvl, self.max_volume_1d_over_tvl, pool.volume_1d_over_tvl),
+            (self.min_apr_pool_30d, self.max_apr_pool_30d, pool.apr_pool_30d),
+        )
+        for min_v, max_v, value in checks:
+            if min_v is not None and value < min_v:
+                return False
+            if max_v is not None and value > max_v:
+                return False
+        return True
+
+
 async def search_pools(
     search: str | None = None,
     token_a: list[str] | None = None,
@@ -633,6 +688,14 @@ async def search_pools(
     min_tvl_usd: float = 0.0,
     protocols: list[str] | None = None,
     limit: int = 15,
+    min_volume_1d_usd: float | None = None,
+    max_volume_1d_usd: float | None = None,
+    min_volume_30d_usd: float | None = None,
+    max_volume_30d_usd: float | None = None,
+    min_volume_1d_over_tvl: float | None = None,
+    max_volume_1d_over_tvl: float | None = None,
+    min_apr_pool_30d: float | None = None,
+    max_apr_pool_30d: float | None = None,
 ) -> list[PoolSummary]:
     """Busca nos subgraphs selecionados (por padrão os 4: v3, v4, v2,
     Aerodrome Slipstream) em paralelo e mescla por TVL.
@@ -662,6 +725,18 @@ async def search_pools(
     particular, foi observado respondendo em >20s para termos de busca muito
     comuns (ex: "WETH") -- se um protocolo falhar ou estourar o timeout, os
     outros ainda são retornados em vez de derrubar a busca inteira.
+
+    Filtros numéricos por janela (`min_volume_1d_usd`, etc, todos opcionais)
+    são aplicados DEPOIS do enriquecimento (dependem de `poolDayData`/
+    `pairDayDatas`, buscados só pros candidatos que sobraram do truncamento
+    por TVL) -- por isso, quando algum deles está ativo, o truncamento
+    pré-enriquecimento soma `_FILTERED_CANDIDATE_EXTRA` a `limit` em vez de
+    usar `limit` puro, senão "top N por TVL, filtrado depois" perderia pools que
+    passariam no filtro mas não estavam no top N original. Ao contrário do
+    índice local (ver index_builder.py/CLAUDE.md), pools v2 aqui TÊM essas
+    métricas medidas de verdade -- o enriquecimento já busca `pairDayDatas`
+    em lote pra v2 mesmo antes desses filtros existirem, só que aqui o custo
+    é por poucos candidatos, não pelos ~30 mil pools v2 de um crawl completo.
     """
     active_protocols = protocols or ["v3", "v4", "v2", "aerodrome"]
     # "Sem atividade" = volume histórico zero (mesmo critério do badge "sem
@@ -669,13 +744,25 @@ async def search_pools(
     # depender de precisão exata de ponto flutuante no lado do subgraph.
     min_volume_usd = 0.01 if hide_inactive else 0.0
 
+    numeric_filters = _NumericFilters(
+        min_volume_1d_usd=min_volume_1d_usd,
+        max_volume_1d_usd=max_volume_1d_usd,
+        min_volume_30d_usd=min_volume_30d_usd,
+        max_volume_30d_usd=max_volume_30d_usd,
+        min_volume_1d_over_tvl=min_volume_1d_over_tvl,
+        max_volume_1d_over_tvl=max_volume_1d_over_tvl,
+        min_apr_pool_30d=min_apr_pool_30d,
+        max_apr_pool_30d=max_apr_pool_30d,
+    )
+    fetch_limit = limit + _FILTERED_CANDIDATE_EXTRA if numeric_filters.is_active() else limit
+
     coros = []
     for protocol in active_protocols:
         if protocol == "v2":
-            coros.append(_search_v2(search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, limit))
+            coros.append(_search_v2(search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, fetch_limit))
         else:
             coros.append(
-                _search_v3v4(protocol, search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, limit)
+                _search_v3v4(protocol, search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, fetch_limit)
             )
     raw_results = await asyncio.gather(*coros, return_exceptions=True)
     results: list[PoolSummary] = []
@@ -686,7 +773,7 @@ async def search_pools(
     # Descarta pools com dados corrompidos/manipulados -- ver _is_plausible_pool.
     results = [p for p in results if _is_plausible_pool(p.total_value_locked_usd, p.fee_tier, p.volume_usd)]
     results.sort(key=lambda p: p.total_value_locked_usd, reverse=True)
-    results = results[:limit]
+    results = results[:fetch_limit]
 
     by_protocol: dict[str, list[PoolSummary]] = {}
     for pool in results:
@@ -717,6 +804,17 @@ async def search_pools(
         pool.volume_1d_over_tvl = stats.volume_1d_over_tvl
         pool.apr_pool_7d = stats.apr_7d
         pool.apr_pool_30d = stats.apr_30d
+
+    if numeric_filters.is_active():
+        # Diferente do índice local (ver index_builder.py), a busca ao vivo
+        # SEMPRE consegue medir volume_1d/30d/APR pra v2 também --
+        # `_fetch_recent_day_data_batch` já buscava isso via uma consulta em
+        # lote separada (pairDayDatas) mesmo antes desses filtros existirem,
+        # só que aqui o custo é por poucos candidatos (`limit + _FILTERED_CANDIDATE_EXTRA`),
+        # não pelos ~30 mil pools v2 do crawl completo -- por isso não há
+        # necessidade do "NULL != 0" do índice local aqui.
+        results = [p for p in results if numeric_filters.pool_passes(p)]
+        results = results[:limit]
 
     return results
 

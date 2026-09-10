@@ -301,6 +301,38 @@ autocomplete, com a capitalização exata como indexada), não de texto livre di
 um problema na prática (diferente da busca por texto livre, que continua usando
 `_contains_nocase`/exato case-insensitive).
 
+### Filtros numéricos (volume/APR) na busca ao vivo
+
+Os mesmos quatro filtros de faixa disponíveis em `/pools`/`/assets` (volume 1d/30d, Vol. 1d/TVL, APR
+30d, min/max) existem também na busca principal (`PoolSearch.tsx`), mas funcionam diferente por
+baixo -- lá é um `WHERE` sobre o SQLite inteiro (recall perfeito); aqui é **pós-filtro** sobre um
+conjunto de candidatos já truncado, porque essas métricas dependem de `poolDayData`/`pairDayDatas`
+(enriquecimento que só roda depois de já ter os candidatos da busca "crua", igual o resto de
+`search_pools` já fazia antes desses filtros existirem).
+
+Isso cria um problema real se não tratado: o fluxo normal já corta pra `limit` (25/50/100) por TVL
+*antes* de buscar o histórico -- filtrar por APR/volume DEPOIS desse corte poderia devolver uma lista
+vazia mesmo havendo pools de TVL baixo que passariam no filtro, só que ficaram fora do corte por TVL.
+Por isso, quando qualquer um desses filtros está ativo, `search_pools` (`services/pools.py`) soma
+`_FILTERED_CANDIDATE_EXTRA` (60) a `limit` pro corte pré-enriquecimento, em vez de usar `limit` puro
+-- tem que ser uma soma, não um piso tipo `max(limit, 60)`: com `limit=100` (a opção mais alta da UI)
+um piso de 60 não alargaria nada, já que 100 já é >= 60. Só depois de filtrar é que corta pro `limit`
+de verdade. `_fetch_recent_day_data_batch` (chamada uma vez por protocolo, só com os candidatos
+daquele protocolo) pagina até 2000 linhas (ver comentário na função) e cada pool consome até 30 (uma
+por dia) -- então ela cobre com folga até ~66 candidatos NUM SÓ protocolo; no pior caso (busca
+concentrada num único protocolo, ex: filtro de protocolo == v3) com `limit=100`, o corte
+pré-enriquecimento vira 160, passando desse teto seguro. Candidatos "no fim da fila" nesse cenário (a
+ordem das linhas devolvidas pelo subgraph não agrupa por pool) podem ficar com o histórico incompleto
+e aparecer com volume/APR zerado mesmo tendo atividade real -- por isso o frontend mostra um aviso de
+que o filtro "pode não pegar pools de TVL bem baixo" quando algum desses campos está preenchido.
+
+Ao contrário do índice local, a busca ao vivo **mede de verdade** volume 1d/30d/APR pra pools v2
+também (não fica NULL) -- `_fetch_recent_day_data_batch` já buscava `pairDayDatas` em lote pra v2
+antes desses filtros existirem (usado pelas colunas Vol. 1d/30d que já existiam na tabela de
+resultados), só que ali o custo é por um punhado de candidatos (`limit + _FILTERED_CANDIDATE_EXTRA`),
+não pelos ~30 mil pools v2 de um crawl completo do índice -- é essa diferença de escala que torna
+inviável fazer o mesmo pro índice local (ver seção "Índice local" acima).
+
 ## Preferência do usuário: não derrubar o servidor de dev à toa
 
 **Antes de editar código, rode `scripts/dev.sh status`.** Se os dois (backend/frontend) já

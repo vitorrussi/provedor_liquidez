@@ -50,6 +50,14 @@ export interface PoolSearchParams {
   minTvlUsd?: number;
   protocols?: string[];
   limit?: number;
+  minVolume1dUsd?: number;
+  maxVolume1dUsd?: number;
+  minVolume30dUsd?: number;
+  maxVolume30dUsd?: number;
+  minVolume1dOverTvl?: number;
+  maxVolume1dOverTvl?: number;
+  minAprPool30d?: number;
+  maxAprPool30d?: number;
 }
 
 export const api = {
@@ -64,6 +72,14 @@ export const api = {
         min_tvl_usd: params.minTvlUsd,
         protocol: params.protocols,
         limit: params.limit,
+        min_volume_1d_usd: params.minVolume1dUsd,
+        max_volume_1d_usd: params.maxVolume1dUsd,
+        min_volume_30d_usd: params.minVolume30dUsd,
+        max_volume_30d_usd: params.maxVolume30dUsd,
+        min_volume_1d_over_tvl: params.minVolume1dOverTvl,
+        max_volume_1d_over_tvl: params.maxVolume1dOverTvl,
+        min_apr_pool_30d: params.minAprPool30d,
+        max_apr_pool_30d: params.maxAprPool30d,
       })}`,
     ),
 

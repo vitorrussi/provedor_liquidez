@@ -26,6 +26,14 @@ async def search_pools(
     min_tvl_usd: float = Query(0.0, ge=0),
     protocol: list[str] | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
+    min_volume_1d_usd: float | None = Query(None, ge=0),
+    max_volume_1d_usd: float | None = Query(None, ge=0),
+    min_volume_30d_usd: float | None = Query(None, ge=0),
+    max_volume_30d_usd: float | None = Query(None, ge=0),
+    min_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    max_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    min_apr_pool_30d: float | None = Query(None),
+    max_apr_pool_30d: float | None = Query(None),
 ):
     if not q and not token_a and not token_b:
         raise HTTPException(
@@ -47,6 +55,14 @@ async def search_pools(
             min_tvl_usd=min_tvl_usd,
             protocols=protocol,
             limit=limit,
+            min_volume_1d_usd=min_volume_1d_usd,
+            max_volume_1d_usd=max_volume_1d_usd,
+            min_volume_30d_usd=min_volume_30d_usd,
+            max_volume_30d_usd=max_volume_30d_usd,
+            min_volume_1d_over_tvl=min_volume_1d_over_tvl,
+            max_volume_1d_over_tvl=max_volume_1d_over_tvl,
+            min_apr_pool_30d=min_apr_pool_30d,
+            max_apr_pool_30d=max_apr_pool_30d,
         )
     except GraphQueryError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
