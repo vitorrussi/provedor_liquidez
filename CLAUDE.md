@@ -288,11 +288,17 @@ Ver `README.md` para detalhes. Pontos que já morderam antes:
   backend não ter conseguido subir na porta esperada e o fetch estar batendo em outro serviço sem
   CORS — confira `scripts/dev.sh status` e `curl localhost:8787/api/health` antes de desconfiar de
   CORS de verdade.
-- **Python/Node do sistema são antigos demais** (Python 3.8, Node 12 — Ubuntu 20.04). O venv do
-  backend foi criado com `uv venv --python 3.12 .venv` e o frontend precisa de Node 18+ via `nvm`
-  (`scripts/dev.sh` já cuida disso sozinho chamando `nvm use lts/*`). Se for rodar comandos manuais
-  fora do script, lembre de `source .venv/bin/activate` (backend) ou `nvm use --lts` (frontend)
-  primeiro, senão vai bater em `SyntaxError`/`TypeError: 'type' object is not subscriptable`.
+- **Python/Node do sistema são antigos demais** (Python 3.8, Node 12 — Ubuntu 20.04) e nem sempre
+  existem no PATH. Por isso o toolchain inteiro (Python + Node) vem de um único ambiente conda
+  (Miniforge), definido em `environment.yml` (`name: provedor-liquidez`, Python 3.12 + Node 24) --
+  criar/atualizar com `conda env create -f environment.yml` ou `make setup` (que também roda
+  `pip install`/`npm install` dentro do ambiente). `scripts/dev.sh` já resolve e ativa esse ambiente
+  sozinho (via `conda activate` dentro do `setsid`, com fallback pra achar o `conda` mesmo fora do
+  PATH -- ver `find_conda_base()` no script e o mesmo padrão em `CONDA_EXE` no `Makefile`). Se for
+  rodar comandos manuais fora do script/Makefile, `conda activate provedor-liquidez` primeiro,
+  senão vai bater em `SyntaxError`/`TypeError: 'type' object is not subscriptable` (Python velho) ou
+  erro de sintaxe (Node velho). Um `backend/.venv` antigo (criado via `uv`) pode ainda existir no
+  disco mas não é mais referenciado por nada -- é seguro apagar.
 - Logs ficam em `.dev/backend.log` e `.dev/frontend.log` (gitignored).
 - Precisa de uma `GRAPH_API_KEY` em `backend/.env` (copiar de `.env.example`) pra qualquer rota que
   toque em dados de pool. Sem ela, a API responde com um erro claro (não crasha).
@@ -318,8 +324,10 @@ o subgraph mudou de schema — investigue antes de "corrigir" o teste.
 ## Testes
 
 ```bash
-cd backend && source .venv/bin/activate && pytest        # matemática pura, não precisa de API key
-cd frontend && npx tsc --noEmit -p tsconfig.app.json      # type-check (não tem suíte de testes JS ainda)
+make test        # backend: matemática pura, não precisa de API key
+make typecheck    # frontend: type-check (não tem suíte de testes JS ainda)
+# equivalente sem make: conda activate provedor-liquidez && cd backend && pytest
+#                       conda activate provedor-liquidez && cd frontend && npx tsc --noEmit -p tsconfig.app.json
 ```
 
 Para mudanças de UI, prefira checar de verdade no navegador (claude-in-chrome) além do type-check —

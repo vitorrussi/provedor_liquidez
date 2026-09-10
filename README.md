@@ -22,8 +22,9 @@ tende a [0, ∞).
 
 ## Pré-requisitos
 
-- Python 3.10+ (o repo foi testado com 3.12 via [`uv`](https://docs.astral.sh/uv/))
-- Node.js 18+ (testado com Node 24 via `nvm`)
+- [conda](https://github.com/conda-forge/miniforge) (Miniforge) — gerencia Python e Node num único
+  ambiente conda, definido em `environment.yml` (Python 3.12 + Node 24). Não precisa de `uv`, `nvm`
+  nem Python/Node do sistema.
 - Uma API key gratuita do The Graph: crie uma conta em https://thegraph.com/studio/ e gere uma key
   em "API Keys" — o free tier cobre uso de desenvolvimento tranquilamente.
 
@@ -46,13 +47,21 @@ processo sem CORS configurado, dando um erro de CORS enganoso no console.
 
 Portas customizáveis via env var, se 8787/5173 estiverem ocupadas: `BACKEND_PORT=8888 FRONTEND_PORT=5174 scripts/dev.sh start`.
 
+## Setup (uma vez)
+
+```bash
+conda env create -f environment.yml   # cria o ambiente `provedor-liquidez` (Python 3.12 + Node 24)
+make setup                            # ou: make conda-env backend-install frontend-install
+```
+
+`make setup` cria o ambiente conda (se ainda não existir) e instala as dependências de
+backend (`pip install -r requirements.txt`) e frontend (`npm install`) dentro dele.
+
 ## Backend
 
 ```bash
+conda activate provedor-liquidez
 cd backend
-python3 -m venv .venv  # ou: uv venv --python 3.12 .venv
-source .venv/bin/activate
-pip install -r requirements.txt  # ou: uv pip install -r requirements.txt
 
 cp .env.example .env
 # edite .env e cole sua GRAPH_API_KEY
@@ -63,7 +72,7 @@ uvicorn app.main:app --reload --port 8787
 Rodar os testes (não precisa de API key — são só matemática pura):
 
 ```bash
-pytest
+make test   # ou: conda activate provedor-liquidez && cd backend && pytest
 ```
 
 A API sobe em `http://localhost:8787`. Docs interativas em `http://localhost:8787/docs`.
@@ -71,8 +80,8 @@ A API sobe em `http://localhost:8787`. Docs interativas em `http://localhost:878
 ## Frontend
 
 ```bash
+conda activate provedor-liquidez
 cd frontend
-npm install
 npm run dev
 ```
 

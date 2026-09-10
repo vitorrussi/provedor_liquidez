@@ -19,11 +19,32 @@ FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 BACKEND_LOG="$RUN_DIR/backend.log"
 FRONTEND_LOG="$RUN_DIR/frontend.log"
 
-NODE_VERSION="${NODE_VERSION:-lts/*}"
+CONDA_ENV="${CONDA_ENV:-provedor-liquidez}"
 # 8000 costuma estar ocupada nesta máquina por um container Docker
 # (docker-proxy) que não é deste projeto -- 8787 evita a colisão.
 BACKEND_PORT="${BACKEND_PORT:-8787}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+
+# Locate conda's base install so we can source conda.sh and `conda activate`
+# inside the setsid subshells below, even if this script's own shell never
+# had `conda init` run for it.
+find_conda_base() {
+  local base=""
+  if command -v conda >/dev/null 2>&1; then
+    base="$(conda info --base 2>/dev/null)" || base=""
+  fi
+  if [ -n "$base" ]; then
+    echo "$base"
+    return
+  fi
+  for candidate in "$HOME/miniforge3" "$HOME/miniconda3" "$HOME/anaconda3"; do
+    if [ -x "$candidate/bin/conda" ]; then
+      echo "$candidate"
+      return
+    fi
+  done
+}
+CONDA_BASE="$(find_conda_base)"
 
 is_running() {
   local pid_file="$1"
@@ -39,9 +60,9 @@ start_backend() {
     echo "backend: already running (pid $(cat "$BACKEND_PID_FILE"))"
     return
   fi
-  if [ ! -x "$ROOT_DIR/backend/.venv/bin/uvicorn" ]; then
-    echo "backend: no venv at backend/.venv -- run:" >&2
-    echo "  cd backend && uv venv --python 3.12 .venv && uv pip install -r requirements.txt" >&2
+  if [ -z "$CONDA_BASE" ] || ! [ -d "$CONDA_BASE/envs/$CONDA_ENV" ]; then
+    echo "backend: no conda env '$CONDA_ENV' found -- run:" >&2
+    echo "  conda env create -f environment.yml && cd backend && conda run -n $CONDA_ENV pip install -r requirements.txt" >&2
     exit 1
   fi
   if [ ! -f "$ROOT_DIR/backend/.env" ]; then
@@ -49,10 +70,12 @@ start_backend() {
          "o servidor sobe mas as rotas de pool vão falhar" >&2
   fi
   echo "backend: starting on port $BACKEND_PORT..."
-  ROOT_DIR="$ROOT_DIR" BACKEND_PORT="$BACKEND_PORT" \
+  ROOT_DIR="$ROOT_DIR" BACKEND_PORT="$BACKEND_PORT" CONDA_BASE="$CONDA_BASE" CONDA_ENV="$CONDA_ENV" \
     setsid bash -c '
       cd "$ROOT_DIR/backend"
-      exec .venv/bin/uvicorn app.main:app --reload --port "$BACKEND_PORT"
+      . "$CONDA_BASE/etc/profile.d/conda.sh"
+      conda activate "$CONDA_ENV"
+      exec uvicorn app.main:app --reload --port "$BACKEND_PORT"
     ' > "$BACKEND_LOG" 2>&1 &
   echo $! > "$BACKEND_PID_FILE"
   echo "backend: started (pid $!), logs: $BACKEND_LOG"
@@ -64,20 +87,22 @@ start_frontend() {
     return
   fi
   if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
-    echo "frontend: no node_modules -- run 'cd frontend && npm install' first" >&2
+    echo "frontend: no node_modules -- run 'conda run -n $CONDA_ENV npm install' inside frontend/ first" >&2
+    exit 1
+  fi
+  if [ -z "$CONDA_BASE" ] || ! [ -d "$CONDA_BASE/envs/$CONDA_ENV" ]; then
+    echo "frontend: no conda env '$CONDA_ENV' found -- run 'conda env create -f environment.yml' first" >&2
     exit 1
   fi
   echo "frontend: starting on port $FRONTEND_PORT (backend at http://localhost:$BACKEND_PORT)..."
-  # Vite needs Node 18+; this machine's default `node` may resolve to an
-  # older version, which fails with a confusing TypeScript SyntaxError.
-  # nvm use here makes that a non-issue for this script.
-  ROOT_DIR="$ROOT_DIR" NODE_VERSION="$NODE_VERSION" FRONTEND_PORT="$FRONTEND_PORT" \
+  # Node comes from the conda env (environment.yml pins Node 24), so this is
+  # always 18+ regardless of what (if anything) `node` resolves to system-wide.
+  ROOT_DIR="$ROOT_DIR" FRONTEND_PORT="$FRONTEND_PORT" CONDA_BASE="$CONDA_BASE" CONDA_ENV="$CONDA_ENV" \
     VITE_API_BASE_URL="http://localhost:$BACKEND_PORT" \
     setsid bash -c '
       cd "$ROOT_DIR/frontend"
-      export NVM_DIR="$HOME/.nvm"
-      [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-      command -v nvm >/dev/null && nvm use "$NODE_VERSION" >/dev/null
+      . "$CONDA_BASE/etc/profile.d/conda.sh"
+      conda activate "$CONDA_ENV"
       exec npm run dev -- --port "$FRONTEND_PORT"
     ' > "$FRONTEND_LOG" 2>&1 &
   echo $! > "$FRONTEND_PID_FILE"

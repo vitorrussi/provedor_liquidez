@@ -1,0 +1,10 @@
+# Conda environment for both backend (Python) and frontend (Node) dev tooling.
+# Create/update: conda env create -f environment.yml   (or: conda env update -f environment.yml --prune)
+# Activate:      conda activate provedor-liquidez
+name: provedor-liquidez
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - nodejs=24
+  - pip
