@@ -89,6 +89,12 @@ export function PoolSearch() {
     if (!urlQuery.trim() && !pairMode) {
       setResults([]);
       setSearched(false);
+      // Também limpa `loading` -- sem isso, cancelar uma busca em andamento
+      // (ex: apagar o termo e buscar de novo) deixava o botão travado em
+      // "Buscando..." pra sempre: o `finally` da promise anterior é pulado
+      // de propósito quando `cancelled` já é true, e esse early return nunca
+      // tocava em `loading`.
+      setLoading(false);
       return;
     }
     let cancelled = false;
