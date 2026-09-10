@@ -5,11 +5,13 @@ export interface Token {
   decimals: number;
 }
 
-export type Protocol = 'v2' | 'v3' | 'v4' | 'aerodrome';
+export type Protocol = 'v2' | 'v3' | 'v4' | 'aerodrome' | 'polygon' | 'avalanche';
+export type Chain = 'mainnet' | 'base' | 'polygon' | 'avalanche';
 
 export interface PoolSummary {
   id: string;
   protocol: Protocol;
+  chain: Chain;
   token0: Token;
   token1: Token;
   fee_tier: number;
@@ -109,7 +111,7 @@ export interface AssetTopPair {
 
 export interface AssetIndexRow {
   id: string;
-  chain: string;
+  chain: Chain;
   address: string;
   symbol: string;
   name: string;
@@ -134,7 +136,7 @@ export interface AssetIndexResponse {
 export interface PoolIndexRow {
   id: string;
   protocol: Protocol;
-  chain: string;
+  chain: Chain;
   token0_symbol: string;
   token0_address: string;
   token1_symbol: string;

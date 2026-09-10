@@ -17,6 +17,12 @@ from ..services import index_builder
 
 router = APIRouter(prefix="/api/index", tags=["index"])
 
+_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome", "polygon", "avalanche"}
+# Chain é um filtro separado de protocol -- útil sobretudo pra /assets, que
+# não tem noção de "protocolo" (um ativo não pertence a uma versão da
+# Uniswap, só a uma chain). Mesmos valores de services/pools.py::_PROTOCOL_CHAIN.
+_VALID_CHAINS = {"mainnet", "base", "polygon", "avalanche"}
+
 
 def _asset_to_row(a: local_db.AssetRecord) -> AssetIndexRow:
     return AssetIndexRow(
@@ -100,13 +106,17 @@ async def list_assets(
     max_volume_30d_usd: float | None = Query(None, ge=0),
     min_volume_1d_over_tvl: float | None = Query(None, ge=0),
     max_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    chain: str | None = None,
 ):
+    if chain is not None and chain not in _VALID_CHAINS:
+        raise HTTPException(status_code=400, detail=f"Rede inválida: {chain}")
     items, total = await asyncio.to_thread(
         local_db.query_assets,
         q, category, exact, hide_inactive, sort, order, limit, offset,
         min_volume_1d_usd, max_volume_1d_usd,
         min_volume_30d_usd, max_volume_30d_usd,
         min_volume_1d_over_tvl, max_volume_1d_over_tvl,
+        chain,
     )
     return AssetIndexResponse(items=[_asset_to_row(a) for a in items], total=total)
 
@@ -115,9 +125,6 @@ async def list_assets(
 async def suggest_assets(prefix: str = Query(..., min_length=1), limit: int = Query(8, ge=1, le=20)):
     items = await asyncio.to_thread(local_db.suggest_assets, prefix, limit)
     return [_asset_to_row(a) for a in items]
-
-
-_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome"}
 
 
 @router.get("/pools", response_model=PoolIndexResponse)
@@ -140,9 +147,12 @@ async def list_pools_index(
     max_volume_1d_over_tvl: float | None = Query(None, ge=0),
     min_apr_pool_30d: float | None = Query(None),
     max_apr_pool_30d: float | None = Query(None),
+    chain: str | None = None,
 ):
     if protocol is not None and protocol not in _VALID_PROTOCOLS:
         raise HTTPException(status_code=400, detail=f"Protocolo inválido: {protocol}")
+    if chain is not None and chain not in _VALID_CHAINS:
+        raise HTTPException(status_code=400, detail=f"Rede inválida: {chain}")
     items, total = await asyncio.to_thread(
         local_db.query_pools,
         q, token_a, token_b, exact, hide_inactive, protocol, sort, order, limit, offset,
@@ -150,5 +160,6 @@ async def list_pools_index(
         min_volume_30d_usd, max_volume_30d_usd,
         min_volume_1d_over_tvl, max_volume_1d_over_tvl,
         min_apr_pool_30d, max_apr_pool_30d,
+        chain,
     )
     return PoolIndexResponse(items=[_pool_to_row(p) for p in items], total=total)

@@ -9,8 +9,8 @@ sobre como mexer no código sem se machucar.
 Ferramenta de apoio a decisão para provedores de liquidez: calcula Impermanent Loss, APR de taxas,
 volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço de um pool.
 Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm dos subgraphs oficiais da
-Uniswap v2, v3 e v4 (Ethereum mainnet) e de um subgraph comunitário do Aerodrome Slipstream (Base),
-todos via gateway do The Graph (um subgraph por protocolo).
+Uniswap v2, v3 e v4 (Ethereum mainnet) e de subgraphs comunitários do Aerodrome Slipstream (Base) e
+da Uniswap v3 em Polygon e Avalanche, todos via gateway do The Graph (um subgraph por protocolo).
 
 ## TVL do subgraph pode estar errado -- por que existe verificação on-chain
 
@@ -55,9 +55,10 @@ e `graph_client.run_query(..., protocol=...)`). v2 é um AMM de produto constant
 (`_SEARCH_QUERY_V2`, `_BATCH_DAY_DATA_QUERY_V2`, `_POOL_DETAIL_QUERY_V2`).
 
 IDs de pool expostos ao frontend levam um prefixo de protocolo, ex: `v2:0xabc...`, `v4:0xabc...`,
-`aerodrome:0xabc...` (`_to_pool_summary`/`_split_pool_id` em `services/pools.py`) — sem isso não dá
-pra saber em qual dos quatro subgraphs buscar o detalhe de um pool a partir só do endereço.
-`client.ts` faz `encodeURIComponent` do id antes de montar a URL por causa do `:`.
+`aerodrome:0xabc...`, `polygon:0xabc...`, `avalanche:0xabc...` (`_to_pool_summary`/`_split_pool_id`
+em `services/pools.py`) — sem isso não dá pra saber em qual dos seis subgraphs buscar o detalhe de
+um pool a partir só do endereço. `client.ts` faz `encodeURIComponent` do id antes de montar a URL
+por causa do `:`.
 
 v2 não tem histórico OHLC indexado (`PairDayData` só tem reservas/volume, sem open/high/low/close) e
 não tem liquidez concentrada — por isso um pool v2 mostra uma versão simplificada no frontend: sem
@@ -68,12 +69,14 @@ não tem liquidez concentrada — por isso um pool v2 mostra uma versão simplif
 essas telas para v2, mas é o comportamento se algo chamar na mão.
 
 O subgraph v4 foi observado respondendo em >20s pra termos de busca comuns (ex: "WETH") — bem mais
-lento que v3. Por isso `search_pools()` isola cada protocolo com `asyncio.gather(..., return_exceptions=True)`
-e usa um timeout mais curto (`_SEARCH_TIMEOUT = 10.0`) só pras buscas: se um protocolo falhar ou
-estourar o timeout, os outros ainda aparecem em vez de derrubar a busca inteira. Isso é intencional,
-não um bug — se notar resultados de v4 (ou Aerodrome) faltando ocasionalmente numa busca por termo
-muito comum, é essa degradação graciosa agindo, não um erro silencioso. Com 4 protocolos em vez de 3,
-uma busca completa (com enriquecimento de volume/APR) pode levar ~10-15s.
+lento que v3; o subgraph de Polygon tem o mesmo problema pra buscas de texto livre sem piso de TVL
+(ver seção "Uniswap v3 em Polygon e Avalanche" abaixo). Por isso `search_pools()` isola cada protocolo
+com `asyncio.gather(..., return_exceptions=True)` e usa um timeout mais curto (`_SEARCH_TIMEOUT = 10.0`)
+só pras buscas: se um protocolo falhar ou estourar o timeout, os outros ainda aparecem em vez de
+derrubar a busca inteira. Isso é intencional, não um bug — se notar resultados de v4, Aerodrome ou
+Polygon faltando ocasionalmente numa busca por termo muito comum, é essa degradação graciosa agindo,
+não um erro silencioso. Com 6 protocolos, uma busca completa (com enriquecimento de volume/APR) pode
+levar ~10-15s.
 
 ## Aerodrome Slipstream (Base)
 
@@ -98,16 +101,18 @@ estreito demais, tipo só transações de usuário; não são substitutos direto
 **Chain diferente tem implicações que já morderam em outros pontos do código, não só na query
 GraphQL:**
 - A verificação de TVL on-chain (ver seção acima) usa `_rpc_url_for_protocol()` em
-  `services/pools.py`, que escolhe `BASE_RPC_URL` para Aerodrome e `ETH_RPC_URL` para v2/v3/v4 --
-  **nunca compartilham o mesmo RPC**. Chamar `balanceOf` num RPC da chain errada não dá erro, só
-  devolve saldo zerado (o contrato simplesmente não existe lá), o que produziria um TVL de $0 com
-  `tvl_verified_onchain=true` -- silenciosamente pior que o bug que essa verificação existe pra
-  corrigir. Por isso `onchain_client.get_erc20_balance` não tem RPC default nenhum: `rpc_url` é
-  sempre explícito no chamador, de propósito, pra esse tipo de engano não poder acontecer sem uma
-  mudança visível no código.
-- Links de contrato de token usam `explorerTokenUrl(address, protocol)` (`format.ts`) -- basescan.org
-  para Aerodrome, etherscan.io para os demais. Endereço igual em duas chains é um contrato
-  completamente diferente; nunca monte esse link sem levar o protocolo em conta.
+  `services/pools.py`, que escolhe o RPC certo por chain via `_CHAIN_RPC_SETTING`
+  (`ETH_RPC_URL`/`BASE_RPC_URL`/`POLYGON_RPC_URL`/`AVALANCHE_RPC_URL`) -- **nunca compartilham o
+  mesmo RPC**. Chamar `balanceOf` num RPC da chain errada não dá erro, só devolve saldo zerado (o
+  contrato simplesmente não existe lá), o que produziria um TVL de $0 com `tvl_verified_onchain=true`
+  -- silenciosamente pior que o bug que essa verificação existe pra corrigir. Por isso
+  `onchain_client.get_erc20_balance` não tem RPC default nenhum: `rpc_url` é sempre explícito no
+  chamador, de propósito, pra esse tipo de engano não poder acontecer sem uma mudança visível no
+  código. Ver seção "Uniswap v3 em Polygon e Avalanche" abaixo pra mais duas chains no mesmo padrão.
+- Links de contrato de token usam `explorerTokenUrl(address, protocol)` (`format.ts`) -- um
+  explorador por chain (etherscan.io, basescan.org, polygonscan.com, snowtrace.io). Endereço igual em
+  duas chains é um contrato completamente diferente; nunca monte esse link sem levar o protocolo em
+  conta.
 - `get_related_pools` só cruza protocolos da mesma chain (`_PROTOCOL_CHAIN` em `services/pools.py`):
   um pool Aerodrome só mostra outras pools Aerodrome do mesmo par (outras fee tiers), nunca pools
   Uniswap mainnet -- os endereços de token nunca bateriam entre chains mesmo que tentasse (WETH tem
@@ -116,6 +121,76 @@ GraphQL:**
   `totalValueLockedUSD` do subgraph Aerodrome e o saldo real (~$67M vs ~$10M num pool WETH/USDC) --
   o mesmo tipo de bug de tracking incremental documentado na seção acima para a Uniswap. Reforça que
   a verificação on-chain não é só teatro pra esse subgraph específico, é necessária de verdade.
+
+## Uniswap v3 em Polygon e Avalanche
+
+Dois protocolos a mais, cada um sua própria chain: `protocol="polygon"` (Polygon PoS) e
+`protocol="avalanche"` (Avalanche C-Chain) -- ambos Uniswap v3 de verdade (não fork), mesmo schema de
+subgraph que v3/v4/Aerodrome, então reaproveitam 100% do código `_v3v4`/`_search_v3v4`/
+`_get_pool_detail_v3v4` etc. em `services/pools.py` -- só muda qual subgraph é consultado
+(`config.py::graph_gateway_url`) e qual RPC é usado pra verificação on-chain
+(`_rpc_url_for_protocol`/`_CHAIN_RPC_SETTING`). Nenhum dos dois subgraphs é publicado/mantido pela
+Uniswap Labs no gateway (sem SLA, igual Aerodrome) -- **verificados individualmente em 2026-09-10**
+antes de usar, mesmo processo já documentado pra Aerodrome:
+- **Polygon** (`3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm`): `factories.id` bate com
+  `0x1F98431c8aD98523631AE4a59f267346ea31F984`, o endereço determinístico (CREATE2) da Uniswap V3
+  Factory usado na maioria das chains v3 -- confere com `factories.id` da v3 mainnet.
+  `hasIndexingErrors: false`.
+- **Avalanche** (`GVH9h9KZ9CqheUEL93qMbq7QwgoBu32QXQDPR6bev4Eo`): `factories.id` bate com
+  `0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD` -- endereço DIFERENTE do determinístico de cima (a
+  Avalanche não recebeu o deploy nas mesmas condições), confirmado batendo com o contrato rotulado
+  "Uniswap V3: Factory" no Snowtrace (não é coincidência de endereço). `hasIndexingErrors: false`.
+- A verificação on-chain (mesmo mecanismo documentado acima) já pegou uma divergência real num pool
+  Avalanche testado: subgraph reportava ~$3,5M de TVL, saldo on-chain real era ~$1,08M -- ~3,2x de
+  diferença, mesmo tipo de bug de tracking incremental já visto em Uniswap mainnet e Aerodrome. Mais
+  uma confirmação de que a verificação on-chain generaliza bem pra subgraphs comunitários novos, não
+  é algo calibrado só pros dois primeiros.
+
+**Achado real ao testar o candidato de Polygon**: antes de escolher o subgraph atual, um outro
+candidato (`uniswap-v3-avalanche`, achado numa busca de texto) respondia normalmente pra queries sem
+filtro mas devolvia `"Type Query has no field factories"` -- acabou sendo só um subgraph de eventos
+de criação de pool (`poolCreated`/`feeAmountEnabled`), não o schema completo de analytics. Reforça a
+prática já estabelecida neste projeto: nunca confiar num subgraph só pelo nome/popularidade sem uma
+consulta real confirmando o schema e os dados.
+
+**A busca de texto livre (`q=`) na Polygon é lenta/instável pro mesmo tipo de query que já degrada
+graciosamente pra v4** -- confirmado em 2026-09-10: uma query sem `where` de TVL, ordenada por
+`totalValueLockedUSD` (exatamente o formato de `_search_query_v3v4`), estourou `_SEARCH_TIMEOUT`
+(10s) de forma repetível, enquanto a mesma consulta com um `where` de TVL (formato do crawl do
+índice, `_INDEX_POOLS_QUERY`) respondeu em segundos. Já é coberto pela mesma degradação graciosa que
+protege contra a lentidão da v4 (`return_exceptions=True`, isolamento por protocolo) -- só documentado
+aqui pra não ser confundido com um bug nesse protocolo especificamente se notado de novo.
+
+**Chains pedidas mas NÃO implementadas ainda** (avaliadas e descartadas por ora, não esquecidas):
+BNB Chain/BSC (a presença da Uniswap lá é pequena -- PancakeSwap domina, e teria schema diferente,
+precisaria de código próprio tipo o de v2) e Robinhood Chain (L2 sobre Arbitrum, mainnet desde
+2026-07-01, Uniswap é parceiro de lançamento lá -- mas é recente demais pra ter um subgraph maduro no
+gateway com confiança; reavaliar depois). Se algum dia forem adicionadas, seguir o mesmo processo de
+verificação (introspecção + `factories.id` contra o contrato on-chain real) antes de confiar nos
+dados, exatamente como feito aqui.
+
+## Filtro de rede (chain) separado do filtro de protocolo
+
+`/pools` e `/assets` têm dois dropdowns de filtro distintos: "Protocolos" (versão/fork da Uniswap --
+v2/v3/v4/Aerodrome/Polygon/Avalanche) e "Rede" (chain -- Ethereum/Base/Polygon/Avalanche). Não são a
+mesma coisa: v2, v3 e v4 são três protocolos diferentes na MESMA rede (Ethereum), então um filtro só
+por protocolo não deixa fácil "ver tudo que é Ethereum" sem marcar os três manualmente -- daí o
+filtro de rede existir separado (`chain` como parâmetro de query próprio em `query_pools`/
+`query_assets`, `local_db.py`, WHERE `chain = ?`). É particularmente importante em `/assets`, que não
+tinha filtro de protocolo nenhum antes (um ativo não pertence a uma versão da Uniswap, só a uma
+chain) -- pra assets, "Rede" é o único filtro de escopo por chain que existe.
+
+Na busca principal (`PoolSearch.tsx`) não existe um filtro de rede separado -- os checkboxes de
+"Protocolos" já cobrem isso (`protocolOptionLabel` em `format.ts` mostra a rede entre parênteses, ex:
+"Uniswap v3 (Polygon)", justamente pra desambiguar "Uniswap v3" que agora existe em três redes
+diferentes -- mainnet, Polygon e Avalanche -- e apareceria repetido/ambíguo numa lista achatada sem
+esse rótulo). Não valeu a pena duplicar a mesma seleção em duas UIs diferentes só pra essa página.
+
+`PoolSummary`/`PoolDetail` (schema usado pela busca ao vivo) ganharam um campo `chain` próprio
+(`services/pools.py::_to_pool_summary`/`_to_pool_summary_v2`/`_get_pool_detail_v3v4`/
+`_get_pool_detail_v2`, sempre `_PROTOCOL_CHAIN[protocol]`) -- antes só existia no índice local
+(`PoolRecord`/`AssetRecord`). Usado pelas linhas de resultado da busca principal pra mostrar a rede
+ao lado do protocolo (`formatChainLabel(pool.chain)` em `PoolSearch.tsx`).
 
 ## Indicadores 7d/30d, pools relacionadas e o sentinel de taxa dinâmica da v4
 
@@ -155,10 +230,11 @@ a cada tecla digitada, já que consulta só o SQLite local.
 
 **Não atualiza sozinho.** Só quando alguém clica em "Atualizar lista" (`POST /api/index/refresh`,
 `IndexRefreshBar.tsx`, usado em ambas as páginas) é que `services/index_builder.py` faz um crawl
-completo dos 4 subgraphs (em paralelo) e substitui o conteúdo inteiro das tabelas de uma vez. Motivo
-de ser manual: com o piso de $1k, o total observado em 2026-09-10 foi **~35 mil ativos / ~42 mil
-pools**, exigindo ~90-150 consultas ao gateway e **~4 minutos** de execução (crawl de v3/v4/aerodrome
-inclui `poolDayData` aninhado por pool, ver abaixo) -- barato o bastante em cota pra não importar
+completo dos 6 subgraphs (em paralelo) e substitui o conteúdo inteiro das tabelas de uma vez. Motivo
+de ser manual: com o piso de $1k, o total observado em 2026-09-10 (depois de adicionar Polygon e
+Avalanche) foi **~36 mil ativos / ~43 mil pools**, exigindo ~90-150 consultas ao gateway e **~4
+minutos** de execução (crawl de todo protocolo v3-like inclui `poolDayData` aninhado por pool, ver
+abaixo) -- barato o bastante em cota pra não importar
 (uma fração pequena da cota mensal de 100k), mas caro o bastante em tempo pra não rodar a cada
 carregamento de página. A paginação usa cursor (`id_gt`), não `skip`/`offset` -- o Graph limita
 `skip` a 5000 e a v3 mainnet sozinha já passa disso com folga (~7900 pools com TVL >= $1k, medido
@@ -170,7 +246,8 @@ páginas (`_MAX_PAGES` dobrado também, mesmo teto total de pools).
 
 **Volume 1d/30d, Vol. 1d/TVL e APR (30d) por pool/ativo** (colunas em `/pools`, filtros em
 `/pools`/`/assets`/busca principal) vêm do crawl, não de uma consulta extra: `poolDayData` é um campo
-derivado (`@derivedFrom`) do schema do `Pool` em v3/v4/Aerodrome, então pedir
+derivado (`@derivedFrom`) do schema do `Pool` em qualquer protocolo v3-like (v3/v4/Aerodrome/Polygon/
+Avalanche), então pedir
 `poolDayData(first: 30, orderBy: date, orderDirection: desc) { date volumeUSD feesUSD }` aninhado
 dentro da própria query de crawl (`_INDEX_POOLS_QUERY`) traz os últimos 30 dias de cada pool na MESMA
 chamada ao gateway, sem custo extra de cota -- confirmado por introspecção e teste ao vivo em
@@ -184,12 +261,12 @@ v2 de uma vez) seria caro demais pro refresh manual. Por isso essas quatro colun
 colunas). Um filtro `min_*`/`max_*` nessas colunas exclui silenciosamente pools/ativos v2 (comparação
 SQL com NULL nunca é verdadeira) -- o frontend mostra um aviso disso quando algum desses filtros está
 preenchido em `/pools`/`/assets`. Pra ativos, `volume_1d_usd`/`volume_30d_usd` são a soma dessas
-métricas das pools onde o ativo aparece que TÊM a métrica medida (só v3/v4/Aerodrome contribuem); um
-ativo fica com essas colunas NULL só se TODAS as suas pools forem v2.
+métricas das pools onde o ativo aparece que TÊM a métrica medida (todo protocolo v3-like contribui);
+um ativo fica com essas colunas NULL só se TODAS as suas pools forem v2.
 
-Se algum dos 4 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
+Se algum dos 6 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
 parcialmente atualizado, não é tudo-ou-nada) e o motivo fica em `protocol_errors` na resposta --
-`IndexRefreshBar` mostra um aviso quando isso acontece. Só se os 4 falharem é que o índice existente
+`IndexRefreshBar` mostra um aviso quando isso acontece. Só se os 6 falharem é que o índice existente
 é preservado sem alteração (nunca sobrescreve com um índice vazio).
 
 **Achado real ao construir esse índice pela primeira vez**: ordenar por TVL descendente expôs dois

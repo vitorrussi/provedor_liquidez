@@ -129,6 +129,7 @@ export const api = {
     maxVolume30dUsd?: number;
     minVolume1dOverTvl?: number;
     maxVolume1dOverTvl?: number;
+    chain?: string;
   }) =>
     request<AssetIndexResponse>(
       `/api/index/assets?${buildQuery({
@@ -146,6 +147,7 @@ export const api = {
         max_volume_30d_usd: params.maxVolume30dUsd,
         min_volume_1d_over_tvl: params.minVolume1dOverTvl,
         max_volume_1d_over_tvl: params.maxVolume1dOverTvl,
+        chain: params.chain,
       })}`,
     ),
 
@@ -171,6 +173,7 @@ export const api = {
     maxVolume1dOverTvl?: number;
     minAprPool30d?: number;
     maxAprPool30d?: number;
+    chain?: string;
   }) =>
     request<PoolIndexResponse>(
       `/api/index/pools?${buildQuery({
@@ -192,6 +195,7 @@ export const api = {
         max_volume_1d_over_tvl: params.maxVolume1dOverTvl,
         min_apr_pool_30d: params.minAprPool30d,
         max_apr_pool_30d: params.maxAprPool30d,
+        chain: params.chain,
       })}`,
     ),
 };

@@ -5,7 +5,7 @@ import type { AssetIndexRow, IndexStatusResponse } from '../api/types';
 import { IndexRefreshBar } from '../components/IndexRefreshBar';
 import { RangeFilter } from '../components/RangeFilter';
 import { SortableHeader } from '../components/SortableHeader';
-import { ASSET_CATEGORIES, formatUsd } from '../format';
+import { ALL_CHAINS, ASSET_CATEGORIES, formatChainLabel, formatUsd } from '../format';
 
 type SortKey = 'symbol' | 'name' | 'category' | 'pools_count' | 'total_tvl_usd';
 type SortDirection = 'asc' | 'desc';
@@ -25,6 +25,7 @@ export function AssetsPage() {
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const [chain, setChain] = useState('');
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
 
@@ -82,6 +83,7 @@ export function AssetsPage() {
     return api.listAssets({
       q: q || undefined,
       category: category || undefined,
+      chain: chain || undefined,
       exact,
       hideInactive,
       sort: sortKey,
@@ -120,6 +122,7 @@ export function AssetsPage() {
   }, [
     q,
     category,
+    chain,
     exact,
     hideInactive,
     pageSize,
@@ -172,8 +175,9 @@ export function AssetsPage() {
 
       <h2>Todos os ativos</h2>
       <p className="muted">
-        Lista local dos ativos com TVL/reserva relevante em pelo menos uma pool indexada (Uniswap v2/v3/v4 e
-        Aerodrome Slipstream). "Categoria" e "Principais pares" são uma aproximação de correlação: categoria vem de
+        Lista local dos ativos com TVL/reserva relevante em pelo menos uma pool indexada (Uniswap v2/v3/v4,
+        Aerodrome Slipstream e Uniswap v3 em Polygon/Avalanche). "Categoria" e "Principais pares" são uma
+        aproximação de correlação: categoria vem de
         um mapeamento fixo por símbolo (stablecoins, ETH/LST, BTC, ...); principais pares é calculado a partir das
         próprias pools indexadas -- não é uma correlação de preço calculada.
       </p>
@@ -200,6 +204,20 @@ export function AssetsPage() {
           {ASSET_CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={chain}
+          onChange={(e) => {
+            setChain(e.target.value);
+            setOffset(0);
+          }}
+        >
+          <option value="">Todas as redes</option>
+          {ALL_CHAINS.map((c) => (
+            <option key={c} value={c}>
+              {formatChainLabel(c)}
             </option>
           ))}
         </select>
@@ -296,7 +314,7 @@ export function AssetsPage() {
                   <span className="pool-list__pair">
                     <span className="pool-list__pair-main">{asset.symbol}</span>
                     <span className="pool-list__pair-sub muted">
-                      {asset.name} · {asset.chain === 'base' ? 'Base' : 'Ethereum'}
+                      {asset.name} · {formatChainLabel(asset.chain)}
                     </span>
                   </span>
                   <span className="pool-list__col">{asset.category ?? '—'}</span>

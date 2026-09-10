@@ -59,24 +59,46 @@ def _is_plausible_pool(total_value_locked_usd: float, fee_tier: int, volume_usd:
 
 # Qual chain cada protocolo vive -- v2/v3/v4 são todos Ethereum mainnet
 # (mesmos endereços de token, mesmo RPC de verificação on-chain); Aerodrome
-# Slipstream é Base mainnet, uma chain totalmente separada (endereços de
+# Slipstream é Base, Uniswap v3 "polygon"/"avalanche" são Polygon PoS/
+# Avalanche C-Chain -- cada uma uma chain totalmente separada (endereços de
 # token diferentes, mesmo pra "o mesmo" token como WETH). Usado para (a)
 # escolher o RPC certo em _rpc_url_for_protocol -- usar o RPC errado não dá
 # erro, só devolve saldo zerado, então isso importa de verdade -- e (b) não
 # misturar protocolos de chains diferentes em get_related_pools (endereços
 # nunca vão bater entre chains, então seria só gasto de quota à toa).
-_PROTOCOL_CHAIN = {"v2": "mainnet", "v3": "mainnet", "v4": "mainnet", "aerodrome": "base"}
+_PROTOCOL_CHAIN = {
+    "v2": "mainnet",
+    "v3": "mainnet",
+    "v4": "mainnet",
+    "aerodrome": "base",
+    "polygon": "polygon",
+    "avalanche": "avalanche",
+}
+
+# Nome de settings field por chain, sempre "{chain}_rpc_url" -- ver config.py.
+# Um dict explícito em vez de `getattr(settings, f"{chain}_rpc_url")` por
+# convenção: um KeyError aqui é mais claro que um AttributeError genérico se
+# uma chain nova for adicionada em _PROTOCOL_CHAIN sem o RPC correspondente
+# em config.py.
+_CHAIN_RPC_SETTING = {
+    "mainnet": "eth_rpc_url",
+    "base": "base_rpc_url",
+    "polygon": "polygon_rpc_url",
+    "avalanche": "avalanche_rpc_url",
+}
 
 
 def _rpc_url_for_protocol(protocol: str) -> str:
     settings = get_settings()
-    return settings.base_rpc_url if _PROTOCOL_CHAIN[protocol] == "base" else settings.eth_rpc_url
+    chain = _PROTOCOL_CHAIN[protocol]
+    return getattr(settings, _CHAIN_RPC_SETTING[chain])
 
-# Timeout mais curto pras 3 buscas em paralelo -- o subgraph v4 foi observado
-# respondendo em >20s pra termos comuns ("WETH"); é melhor falhar rápido nesse
-# protocolo (e degradar graciosamente, ver search_pools) do que segurar a
-# resposta inteira por 20s. Endpoints de detalhe/histórico (1 chamada, não 3
-# em paralelo) continuam no timeout padrão de graph_client.run_query.
+# Timeout mais curto pras (até 6) buscas em paralelo -- o subgraph v4 foi
+# observado respondendo em >20s pra termos comuns ("WETH"); é melhor falhar
+# rápido nesse protocolo (e degradar graciosamente, ver search_pools) do que
+# segurar a resposta inteira por 20s. Endpoints de detalhe/histórico (1
+# chamada, não várias em paralelo) continuam no timeout padrão de
+# graph_client.run_query.
 _SEARCH_TIMEOUT = 10.0
 
 # Templates (não constantes estáticas) porque "busca exata" vs "busca por
@@ -419,7 +441,7 @@ def _split_pool_id(pool_id: str) -> tuple[str, str]:
     assume v3 (compatibilidade com IDs antigos)."""
     if ":" in pool_id:
         protocol, raw = pool_id.split(":", 1)
-        if protocol in ("v2", "v3", "v4", "aerodrome"):
+        if protocol in _PROTOCOL_CHAIN:
             return protocol, raw.lower()
     return "v3", pool_id.lower()
 
@@ -432,6 +454,7 @@ def _to_pool_summary(raw: dict, protocol: str) -> PoolSummary:
     return PoolSummary(
         id=f"{protocol}:{raw['id']}",
         protocol=protocol,
+        chain=_PROTOCOL_CHAIN[protocol],
         token0=_to_token(raw["token0"]),
         token1=_to_token(raw["token1"]),
         fee_tier=int(raw["feeTier"]),
@@ -447,6 +470,7 @@ def _to_pool_summary_v2(raw: dict) -> PoolSummary:
     return PoolSummary(
         id=f"v2:{raw['id']}",
         protocol="v2",
+        chain=_PROTOCOL_CHAIN["v2"],
         token0=_to_token(raw["token0"]),
         token1=_to_token(raw["token1"]),
         fee_tier=V2_FEE_TIER,
@@ -697,8 +721,9 @@ async def search_pools(
     min_apr_pool_30d: float | None = None,
     max_apr_pool_30d: float | None = None,
 ) -> list[PoolSummary]:
-    """Busca nos subgraphs selecionados (por padrão os 4: v3, v4, v2,
-    Aerodrome Slipstream) em paralelo e mescla por TVL.
+    """Busca nos subgraphs selecionados (por padrão os 6: v3, v4, v2,
+    Aerodrome Slipstream, Uniswap v3 Polygon, Uniswap v3 Avalanche) em
+    paralelo e mescla por TVL.
 
     Três modos, mutuamente exclusivos, em ordem de prioridade: busca por par
     (`token_a` + `token_b`, cada um uma lista de siglas escolhidas no
@@ -718,7 +743,7 @@ async def search_pools(
     resultados de verdade em vez de pools mortas. `min_tvl_usd` funciona do
     mesmo jeito para TVL.
 
-    Custo em chamadas ao gateway: até 4 de busca (1 por protocolo ativo) +
+    Custo em chamadas ao gateway: até 6 de busca (1 por protocolo ativo) +
     até 2 de enriquecimento (dados diários) por protocolo com resultados.
 
     Cada protocolo é isolado com `return_exceptions=True`: o subgraph v4, em
@@ -738,7 +763,7 @@ async def search_pools(
     em lote pra v2 mesmo antes desses filtros existirem, só que aqui o custo
     é por poucos candidatos, não pelos ~30 mil pools v2 de um crawl completo.
     """
-    active_protocols = protocols or ["v3", "v4", "v2", "aerodrome"]
+    active_protocols = protocols or ["v3", "v4", "v2", "aerodrome", "polygon", "avalanche"]
     # "Sem atividade" = volume histórico zero (mesmo critério do badge "sem
     # atividade" no frontend) -- um piso pequeno em vez de "> 0" pra não
     # depender de precisão exata de ponto flutuante no lado do subgraph.
@@ -863,6 +888,7 @@ async def _get_pool_detail_v3v4(protocol: str, raw_id: str) -> PoolDetail | None
     pool = PoolDetail(
         id=f"{protocol}:{raw['id']}",
         protocol=protocol,
+        chain=_PROTOCOL_CHAIN[protocol],
         token0=_to_token(raw["token0"]),
         token1=_to_token(raw["token1"]),
         fee_tier=int(raw["feeTier"]),
@@ -903,6 +929,7 @@ async def _get_pool_detail_v2(raw_id: str) -> PoolDetail | None:
     pool = PoolDetail(
         id=f"v2:{raw['id']}",
         protocol="v2",
+        chain=_PROTOCOL_CHAIN["v2"],
         token0=_to_token(raw["token0"]),
         token1=_to_token(raw["token1"]),
         fee_tier=V2_FEE_TIER,

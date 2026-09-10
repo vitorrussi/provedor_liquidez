@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import type { AssetIndexRow, Protocol, PoolSummary } from '../api/types';
-import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
+import {
+  formatChainLabel,
+  formatFeeTier,
+  formatPercent,
+  formatRatio,
+  formatUsd,
+  protocolLabel,
+  protocolOptionLabel,
+} from '../format';
 import { RangeFilter } from './RangeFilter';
 import { SortableHeader } from './SortableHeader';
 import { TokenMultiSelect } from './TokenMultiSelect';
@@ -25,7 +33,7 @@ const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
   volume: 'desc',
 };
 
-const ALL_PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome'];
+const ALL_PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche'];
 const RESULT_LIMIT_OPTIONS = [25, 50, 100];
 
 export function PoolSearch() {
@@ -369,7 +377,7 @@ export function PoolSearch() {
                     checked={selectedProtocols.includes(p)}
                     onChange={() => toggleProtocol(p)}
                   />
-                  {protocolLabel(p)}
+                  {protocolOptionLabel(p)}
                 </label>
               ))}
             </div>
@@ -393,9 +401,10 @@ export function PoolSearch() {
       {results.length > 0 && (
         <>
           <p className="footnote pool-search__hint">
-            Busca em Uniswap v2, v3 e v4, e em Aerodrome Slipstream (Base). A busca casa qualquer token
-            cujo símbolo ou nome contenha o termo. O mesmo par pode aparecer mais de uma vez: em
-            v3/v4/Aerodrome cada taxa (0,01% / 0,05% / 0,30% / 1%) é um pool com contrato e liquidez
+            Busca em Uniswap v2, v3 e v4 (Ethereum), Aerodrome Slipstream (Base) e Uniswap v3 em Polygon e
+            Avalanche. A busca casa qualquer token cujo símbolo ou nome contenha o termo. O mesmo par pode
+            aparecer mais de uma vez: em qualquer protocolo v3-like (v3, v4, Aerodrome, Polygon, Avalanche)
+            cada taxa (0,01% / 0,05% / 0,30% / 1%) é um pool com contrato e liquidez
             próprios; em v2 a taxa é sempre fixa em 0,30% (não existe conceito de faixa de taxa nem de
             liquidez concentrada). "Vol. 30 dias" e "APR da pool" são estimados a partir dos últimos ~30
             dias de histórico — a Uniswap não expõe
@@ -492,7 +501,7 @@ export function PoolSearch() {
                         )}
                       </span>
                       <span className="pool-list__pair-sub muted">
-                        {protocolLabel(pool.protocol)} · {formatFeeTier(pool.fee_tier)}
+                        {formatChainLabel(pool.chain)} · {protocolLabel(pool.protocol)} · {formatFeeTier(pool.fee_tier)}
                         {pool.protocol === 'v2' && ' (fixa)'}
                       </span>
                     </span>

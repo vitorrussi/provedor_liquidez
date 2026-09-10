@@ -321,6 +321,7 @@ def query_assets(
     max_volume_30d_usd: float | None = None,
     min_volume_1d_over_tvl: float | None = None,
     max_volume_1d_over_tvl: float | None = None,
+    chain: str | None = None,
 ) -> tuple[list[AssetRecord], int]:
     sort_col = sort if sort in _ASSET_SORT_COLUMNS else "total_tvl_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -337,6 +338,9 @@ def query_assets(
     if category:
         where.append("category = ?")
         params.append(category)
+    if chain:
+        where.append("chain = ?")
+        params.append(chain)
     if hide_inactive:
         where.append("total_volume_usd >= ?")
         params.append(_MIN_ACTIVE_VOLUME_USD)
@@ -385,6 +389,7 @@ def query_pools(
     max_volume_1d_over_tvl: float | None = None,
     min_apr_pool_30d: float | None = None,
     max_apr_pool_30d: float | None = None,
+    chain: str | None = None,
 ) -> tuple[list[PoolRecord], int]:
     sort_col = sort if sort in _POOL_SORT_COLUMNS else "total_value_locked_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -423,6 +428,9 @@ def query_pools(
     if protocol:
         where.append("protocol = ?")
         params.append(protocol)
+    if chain:
+        where.append("chain = ?")
+        params.append(chain)
     if hide_inactive:
         where.append("volume_usd >= ?")
         params.append(_MIN_ACTIVE_VOLUME_USD)

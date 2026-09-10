@@ -6,7 +6,7 @@ import { IndexRefreshBar } from '../components/IndexRefreshBar';
 import { RangeFilter } from '../components/RangeFilter';
 import { SortableHeader } from '../components/SortableHeader';
 import { TokenMultiSelect } from '../components/TokenMultiSelect';
-import { formatFeeTier, formatRatio, formatUsd, protocolLabel } from '../format';
+import { ALL_CHAINS, formatChainLabel, formatFeeTier, formatRatio, formatUsd, protocolLabel, protocolOptionLabel } from '../format';
 
 type SortKey =
   | 'token0_symbol'
@@ -29,7 +29,7 @@ function toFilterNumber(value: string): number | undefined {
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
-const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome'];
+const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche'];
 
 export function PoolsIndexPage() {
   const navigate = useNavigate();
@@ -47,6 +47,7 @@ export function PoolsIndexPage() {
   const [tokenA, setTokenA] = useState<string[]>([]);
   const [tokenB, setTokenB] = useState<string[]>([]);
   const [protocol, setProtocol] = useState('');
+  const [chain, setChain] = useState('');
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
 
@@ -121,6 +122,7 @@ export function PoolsIndexPage() {
       exact,
       hideInactive,
       protocol: protocol || undefined,
+      chain: chain || undefined,
       sort: sortKey,
       order: sortDirection,
       limit: pageSize,
@@ -166,6 +168,7 @@ export function PoolsIndexPage() {
     exact,
     hideInactive,
     protocol,
+    chain,
     pageSize,
     sortKey,
     sortDirection,
@@ -218,7 +221,8 @@ export function PoolsIndexPage() {
 
       <h2>Todas as pools</h2>
       <p className="muted">
-        Lista local de todas as pools com TVL/reserva relevante (Uniswap v2/v3/v4 e Aerodrome Slipstream). Clique
+        Lista local de todas as pools com TVL/reserva relevante (Uniswap v2/v3/v4, Aerodrome Slipstream e Uniswap v3
+        em Polygon/Avalanche). Clique
         numa linha pra abrir o detalhe da pool.
       </p>
 
@@ -244,7 +248,21 @@ export function PoolsIndexPage() {
           <option value="">Todos os protocolos</option>
           {PROTOCOLS.map((p) => (
             <option key={p} value={p}>
-              {protocolLabel(p)}
+              {protocolOptionLabel(p)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={chain}
+          onChange={(e) => {
+            setChain(e.target.value);
+            setOffset(0);
+          }}
+        >
+          <option value="">Todas as redes</option>
+          {ALL_CHAINS.map((c) => (
+            <option key={c} value={c}>
+              {formatChainLabel(c)}
             </option>
           ))}
         </select>
@@ -409,7 +427,7 @@ export function PoolsIndexPage() {
                     <span className="pool-list__pair-main">
                       {pool.token0_symbol} / {pool.token1_symbol}
                     </span>
-                    <span className="pool-list__pair-sub muted">{pool.chain === 'base' ? 'Base' : 'Ethereum'}</span>
+                    <span className="pool-list__pair-sub muted">{formatChainLabel(pool.chain)}</span>
                   </span>
                   <span className="pool-list__col">{protocolLabel(pool.protocol)}</span>
                   <span className="pool-list__col">{formatFeeTier(pool.fee_tier)}</span>

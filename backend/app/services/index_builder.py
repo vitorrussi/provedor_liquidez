@@ -8,13 +8,15 @@ mainnet, medido em 2026-09-09). `_MAX_PAGES` é uma margem de segurança, não
 um limite esperado de ser atingido na prática.
 
 Não roda automaticamente: só quando o usuário clica em "Atualizar" (ver
-routers/local_index.py). Custo típico de um refresh completo: ~60-120
-consultas ao gateway (rodando os 4 protocolos em paralelo) -- ainda uma
-fração pequena da cota mensal de 100k, mas grande o bastante pra não valer a
-pena rodar a cada carregamento de página.
+routers/local_index.py). Custo típico de um refresh completo: ~90-180
+consultas ao gateway (rodando os 6 protocolos em paralelo -- v2/v3/v4
+mainnet, Aerodrome Slipstream em Base, Uniswap v3 em Polygon e Avalanche) --
+ainda uma fração pequena da cota mensal de 100k, mas grande o bastante pra
+não valer a pena rodar a cada carregamento de página.
 
-`_PAGE_SIZE` é 500, não 1.000, para v3/v4/aerodrome (que trazem
-`poolDayData` aninhado, ver `_INDEX_POOLS_QUERY`) -- achado real em
+`_PAGE_SIZE` é 500, não 1.000, para todos os protocolos v3-like (v3/v4/
+aerodrome/polygon/avalanche, que trazem `poolDayData` aninhado, ver
+`_INDEX_POOLS_QUERY`) -- achado real em
 2026-09-10: com `first: 1000` e 30 dias aninhados por pool (até 30 mil
 entidades por página), um crawl de v3 falhou com "bad indexers:
 Timeout/Unavailable" no gateway; página menor reduz o payload por
@@ -140,9 +142,9 @@ class _AssetAgg:
     # local_db._MIN_ACTIVE_VOLUME_USD).
     total_volume_usd: float = 0.0
     # Soma do volume 1d/30d das pools onde o ativo aparece que TÊM essa
-    # métrica medida (ver _INDEX_POOLS_QUERY) -- só pools v3/v4/aerodrome
-    # contribuem; v2 não participa dessa soma (não é tratado como 0, ver
-    # `has_windowed_data`).
+    # métrica medida (ver _INDEX_POOLS_QUERY) -- todo protocolo v3-like
+    # contribui (v3/v4/aerodrome/polygon/avalanche); só v2 não participa
+    # dessa soma (não é tratado como 0, ver `has_windowed_data`).
     total_volume_1d_usd: float = 0.0
     total_volume_30d_usd: float = 0.0
     # True se pelo menos uma pool desse ativo tinha volume_1d/30d medido --
@@ -210,19 +212,21 @@ def _build_pool_record(
 
 
 async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
-    """Refaz o índice local do zero (crawl completo dos 4 protocolos, em
+    """Refaz o índice local do zero (crawl completo dos 6 protocolos, em
     paralelo). Se TODOS os protocolos falharem, não sobrescreve o índice
     existente (levanta GraphQueryError) -- uma atualização parcial (alguns
     protocolos ok, outros não) ainda substitui o índice inteiro, mas fica
     registrada em `protocol_errors` pra UI avisar que aquele protocolo pode
     estar desatualizado até a próxima tentativa.
     """
-    protocols = ["v2", "v3", "v4", "aerodrome"]
+    protocols = ["v2", "v3", "v4", "aerodrome", "polygon", "avalanche"]
     raw_results = await asyncio.gather(
         _crawl_v2(min_tvl_usd),
         _crawl_v3v4_like("v3", min_tvl_usd),
         _crawl_v3v4_like("v4", min_tvl_usd),
         _crawl_v3v4_like("aerodrome", min_tvl_usd),
+        _crawl_v3v4_like("polygon", min_tvl_usd),
+        _crawl_v3v4_like("avalanche", min_tvl_usd),
         return_exceptions=True,
     )
 

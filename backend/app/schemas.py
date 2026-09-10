@@ -10,7 +10,12 @@ class Token(BaseModel):
 
 class PoolSummary(BaseModel):
     id: str
-    protocol: str = "v3"  # "v2" | "v3" | "v4" | "aerodrome"
+    protocol: str = "v3"  # "v2" | "v3" | "v4" | "aerodrome" | "polygon" | "avalanche"
+    # "mainnet" | "base" | "polygon" | "avalanche" -- derivado de `protocol`
+    # (ver services/pools.py::_PROTOCOL_CHAIN), não independente dele; existe
+    # como campo próprio pro frontend não precisar reimplementar esse mapa
+    # só pra mostrar a rede na lista de resultados.
+    chain: str = "mainnet"
     token0: Token
     token1: Token
     fee_tier: int

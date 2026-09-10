@@ -1,3 +1,5 @@
+import type { Chain, Protocol } from './api/types';
+
 const COMPACT_SCALES: Array<[number, string]> = [
   [1e12, 'T'], // trilhão
   [1e9, 'B'], // bilhão
@@ -64,9 +66,34 @@ export function formatFeeTier(feeTier: number): string {
   return `${(feeTier / 10_000).toFixed(2)}%`;
 }
 
-export function protocolLabel(protocol: 'v2' | 'v3' | 'v4' | 'aerodrome'): string {
+export function protocolLabel(protocol: Protocol): string {
   if (protocol === 'aerodrome') return 'Aerodrome Slipstream';
+  // polygon/avalanche são Uniswap v3 (mesmo schema/versão) em outra chain --
+  // a chain já aparece separada via formatChainLabel, não precisa repetir
+  // aqui (evitaria "Uniswap v3 (Polygon)" ao lado de um badge "Polygon").
+  if (protocol === 'polygon' || protocol === 'avalanche') return 'Uniswap v3';
   return `Uniswap ${protocol}`;
+}
+
+// Nome de rede pra exibição nas listas -- separado de protocolLabel porque
+// múltiplos protocolos podem viver na mesma chain (v2/v3/v4 são todos
+// Ethereum mainnet) e o usuário quer ver a rede, não só qual DEX/versão.
+// Espelha backend/app/services/pools.py::_PROTOCOL_CHAIN (valores internos
+// "mainnet"/"base"/"polygon"/"avalanche") -- se uma chain nova for
+// adicionada lá, adicione aqui também.
+export function formatChainLabel(chain: Chain): string {
+  switch (chain) {
+    case 'mainnet':
+      return 'Ethereum';
+    case 'base':
+      return 'Base';
+    case 'polygon':
+      return 'Polygon';
+    case 'avalanche':
+      return 'Avalanche';
+    default:
+      return chain;
+  }
 }
 
 export function formatDate(unixSeconds: number): string {
@@ -82,15 +109,49 @@ export function formatDateTime(unixSeconds: number): string {
 // categoria nova lá, adicione aqui também.
 export const ASSET_CATEGORIES = ['Stablecoin (USD)', 'ETH / LST', 'BTC', 'Governança de DEX'];
 
+// Espelha backend/app/services/pools.py::_PROTOCOL_CHAIN.values() -- usado
+// pro filtro "Rede" em /assets e /pools (separado do filtro de protocolo,
+// já que um ativo não pertence a uma versão da Uniswap, só a uma chain).
+export const ALL_CHAINS: Chain[] = ['mainnet', 'base', 'polygon', 'avalanche'];
+
+// Espelha backend/app/services/pools.py::_PROTOCOL_CHAIN (chave->chain).
+const PROTOCOL_CHAIN: Record<Protocol, Chain> = {
+  v2: 'mainnet',
+  v3: 'mainnet',
+  v4: 'mainnet',
+  aerodrome: 'base',
+  polygon: 'polygon',
+  avalanche: 'avalanche',
+};
+
+// Rótulo pra uso em listas ACHATADAS de protocolo (ex: dropdown "Protocolos"
+// em /pools) -- diferente de `protocolLabel` sozinho, que agora é ambíguo
+// entre "v3" (mainnet) e "polygon"/"avalanche" (também "Uniswap v3", só que
+// noutra chain, ver comentário em protocolLabel). Nas tabelas de resultado
+// isso não é um problema porque a chain já aparece numa coluna/rótulo
+// separado ao lado -- só dropdowns "só protocolo" precisam desse rótulo
+// combinado.
+export function protocolOptionLabel(protocol: Protocol): string {
+  return `${protocolLabel(protocol)} (${formatChainLabel(PROTOCOL_CHAIN[protocol])})`;
+}
+
 export function truncateAddress(address: string): string {
   if (address.length <= 12) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-// Aerodrome Slipstream roda na Base, não em Ethereum mainnet -- o mesmo
-// endereço de contrato significa coisas diferentes em cada chain, então o
-// link do explorador tem que seguir o protocolo, não ser sempre etherscan.
-export function explorerTokenUrl(address: string, protocol: 'v2' | 'v3' | 'v4' | 'aerodrome'): string {
-  const base = protocol === 'aerodrome' ? 'https://basescan.org' : 'https://etherscan.io';
-  return `${base}/token/${address}`;
+// O mesmo endereço de contrato significa coisas diferentes em cada chain,
+// então o link do explorador tem que seguir a chain do protocolo, não ser
+// sempre etherscan -- v2/v3/v4 (Ethereum mainnet), aerodrome (Base), polygon
+// (Polygon PoS), avalanche (Avalanche C-Chain).
+export function explorerTokenUrl(address: string, protocol: Protocol): string {
+  const explorerByProtocol: Record<Protocol, string> = {
+    v2: 'https://etherscan.io',
+    v3: 'https://etherscan.io',
+    v4: 'https://etherscan.io',
+    aerodrome: 'https://basescan.org',
+    polygon: 'https://polygonscan.com',
+    avalanche: 'https://snowtrace.io',
+  };
+  return `${explorerByProtocol[protocol]}/token/${address}`;
 }
