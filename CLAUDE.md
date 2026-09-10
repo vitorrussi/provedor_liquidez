@@ -169,10 +169,77 @@ nessa busca", a primeira pergunta é se ele tem algum piso de TVL configurado no
 **Chains pedidas mas NÃO implementadas ainda** (avaliadas e descartadas por ora, não esquecidas):
 BNB Chain/BSC (a presença da Uniswap lá é pequena -- PancakeSwap domina, e teria schema diferente,
 precisaria de código próprio tipo o de v2) e Robinhood Chain (L2 sobre Arbitrum, mainnet desde
-2026-07-01, Uniswap é parceiro de lançamento lá -- mas é recente demais pra ter um subgraph maduro no
-gateway com confiança; reavaliar depois). Se algum dia forem adicionadas, seguir o mesmo processo de
-verificação (introspecção + `factories.id` contra o contrato on-chain real) antes de confiar nos
-dados, exatamente como feito aqui.
+2026-07-01, Uniswap é parceiro de lançamento lá, ~$130M/dia de volume em ações tokenizadas por lá --
+mas **verificado em 2026-09-10 no Graph Explorer que essa chain ainda nem aparece na lista de redes
+indexadas pelo The Graph** -- não é "subgraph imaturo", é "não existe subgraph nenhum pra consultar
+via gateway", já que toda a arquitetura deste app (`graph_client.py`, `config.py::graph_gateway_url`)
+depende do gateway do The Graph. Ver seção "Ações tokenizadas (RWA)" abaixo pro contexto completo de
+por que isso foi investigado). Se algum dia forem adicionadas, seguir o mesmo processo de verificação
+(introspecção + `factories.id` contra o contrato on-chain real) antes de confiar nos dados, exatamente
+como feito aqui.
+
+## Ações tokenizadas (RWA) -- pesquisado, NÃO implementado (2026-09-10)
+
+Usuário pediu suporte a pools de ações tokenizadas de grandes empresas americanas (Apple, Microsoft,
+Amazon, Google, Tesla, "e mais se der"). Pesquisa extensa feita, decisão foi **não implementar por
+enquanto** -- não é falta de esforço, é que não existe liquidez de verdade acessível pela arquitetura
+deste app hoje. Documentado aqui pra não perder o trabalho e pra saber exatamente o que reavaliar
+depois, em vez de repetir a pesquisa do zero numa sessão futura.
+
+**Endereços verificados (Backed Finance / "xStocks"), todos Ethereum mainnet, todos com fonte
+independente (CSV oficial `github.com/backed-fi/cow-xstocks-tokenlist`, 3 deles cruzados também no
+Etherscan)**:
+
+| Empresa | Symbol on-chain | Endereço |
+|---|---|---|
+| Apple | AAPLx | `0x9d275685dc284c8eb1c79f6aba7a63dc75ec890a` |
+| Microsoft | MSFTx | `0x5621737f42dae558b81269fcb9e9e70c19aa6b35` |
+| Amazon | AMZNx | `0x3557ba345b01efa20a1bddc61f573bfd87195081` |
+| Alphabet/Google | GOOGLx | `0xe92f673ca36c5e2efd2de7628f815f84807e803f` |
+| Tesla | TSLAx | `0x8ad3c73f833d3f9a523ab01476625f269aeb7cf0` |
+| Nvidia | NVDAx | `0xc845b2894dbddd03858fd2d643b4ef725fe0849d` |
+| Meta | METAx | `0x96702be57cd9777f835117a809c7124fe4ec989a` |
+| Netflix | NFLXx | `0xa6a65ac27e76cd53cb790473e4345c46e5ebf961` |
+| Coinbase | COINx | `0x364f210f430ec2448fc68a49203040f6124096f0` |
+| Broadcom | AVGOx | `0x38bac69cbbd28156796e4163b2b6dcb81e336565` |
+| Visa | Vx | `0x2363fd1235c1b6d3a5088ddf8df3a0b3a30c5293` |
+| JPMorgan | JPMx | `0xd9fc3e075d45254a1d834fea18af8041207dea0a` |
+| Walmart | WMTx | `0x7aefc9965699fbea943e03264d96e50cd4a97b21` |
+| Berkshire Hathaway B | BRK.Bx | `0x12992613fdd35abe95dec5a4964331b1ee23b50d` |
+
+**Achado real (verificado com consulta direta ao subgraph, não suposição)**: rodei `pools(where:
+{token0_in: [...]})`/`token1_in` contra os 14 endereços acima na v3 mainnet, e a mesma coisa em
+`pairs` na v2 -- **só a Tesla (TSLAx) tem alguma pool com TVL não-trivial, e mesmo essa tem só
+~$100** (`0xa7fd774e0ad54a6d2ceafb4103615f473e589cc6`, fee 0.3%). Nvidia e Coinbase têm pools com TVL
+de centavos/zero. As outras 11 empresas (incluindo Apple, Microsoft, Amazon, Google -- 4 das 5 que o
+usuário pediu primeiro) têm **zero pools** na Uniswap v2 ou v3 mainnet. Não é problema de indexação
+nem de filtro de TVL do índice local -- é ausência real de liquidez nesse par chain/protocolo.
+
+**Onde a liquidez de verdade está, e por que não dá pra usar**:
+- **Solana (Raydium/Jupiter)**: é onde o volume de verdade das xStocks acontece -- AAPLx com ~$338k
+  de liquidez e ~$2,17M de volume/24h, TSLAx com ~$499k (checado via API pública do DexScreener).
+  Solana não é EVM -- não tem subgraph no mesmo formato, não tem `eth_call` pra verificação de TVL,
+  não se encaixa em nada do que `graph_client.py`/`onchain_client.py`/o modelo `chain`/`protocol`
+  deste app assumem. Suportar Solana seria construir uma stack paralela do zero, não "adicionar mais
+  uma chain" como Polygon/Avalanche foram (mesmo schema Uniswap v3, só mudou endpoint).
+- **Robinhood Chain**: certinho em teoria (Uniswap v3/v4 nativo, mesmo schema que todo o resto do
+  app já fala, ~$130M/dia de volume) -- mas **não tem subgraph indexado pelo The Graph ainda**
+  (verificado ao vivo no Graph Explorer, a chain nem aparece na lista de redes). Essa é a única das
+  opções pesquisadas com potencial real de virar uma integração barata (mesmo código `_v3v4`
+  reaproveitado) -- só falta a infraestrutura de indexação existir. **Reavaliar essa chain
+  especificamente quando revisitar o assunto.**
+- **Ondo Finance** (o "TSLAon" que já aparecia nos nossos dados antes dessa pesquisa): não funciona
+  como uma pool de AMM pré-financiada -- faz mint/redeem contra a liquidez real da bolsa via um
+  agregador (Jupiter, na Solana). Não tem uma posição de LP/IL de verdade por trás pra esse app
+  modelar, independente de qual chain -- categoria de produto incompatível com o resto do app, não só
+  uma questão de chain suportada.
+
+**Decisão**: não implementar a categoria "Ação tokenizada" agora -- com a Ethereum mainnet tendo
+efetivamente uma pool de $100 de TVL pra mostrar, a infraestrutura (categoria address-verificada,
+filtro em `/assets`/`/pools`) não teria dado nenhum pra exibir que já justifique o esforço. Reavaliar
+quando: (a) a Robinhood Chain aparecer indexada no Graph Explorer, ou (b) a liquidez de xStocks na
+Ethereum mainnet crescer de forma que valha a pena. Os endereços acima já verificados podem ser
+reaproveitados direto nesse momento, sem repetir a pesquisa.
 
 ## Filtro de rede (chain) separado do filtro de protocolo
 
