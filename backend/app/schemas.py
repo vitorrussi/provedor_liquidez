@@ -137,6 +137,11 @@ class AssetIndexRow(BaseModel):
     total_tvl_usd: float
     total_volume_usd: float
     top_pairs: list[AssetTopPair]
+    # None quando nenhuma pool desse ativo tem a métrica medida (ativo só
+    # aparece em pools v2) -- ver local_db.py e services/index_builder.py.
+    volume_1d_usd: float | None = None
+    volume_30d_usd: float | None = None
+    volume_1d_over_tvl: float | None = None
 
 
 class AssetIndexResponse(BaseModel):
@@ -156,6 +161,12 @@ class PoolIndexRow(BaseModel):
     total_value_locked_usd: float
     volume_usd: float
     created_at: int | None
+    # None para pools v2 (sem poolDayData indexado com relação reversa no
+    # subgraph) -- ver local_db.py e services/index_builder.py.
+    volume_1d_usd: float | None = None
+    volume_30d_usd: float | None = None
+    volume_1d_over_tvl: float | None = None
+    apr_pool_30d: float | None = None
 
 
 class PoolIndexResponse(BaseModel):

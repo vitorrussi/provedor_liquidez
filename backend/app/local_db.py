@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS assets (
     pools_count INTEGER NOT NULL,
     total_tvl_usd REAL NOT NULL,
     total_volume_usd REAL NOT NULL DEFAULT 0,
-    top_pairs TEXT NOT NULL
+    top_pairs TEXT NOT NULL,
+    volume_1d_usd REAL,
+    volume_30d_usd REAL,
+    volume_1d_over_tvl REAL
 );
 CREATE INDEX IF NOT EXISTS idx_assets_symbol ON assets(symbol);
 CREATE INDEX IF NOT EXISTS idx_assets_tvl ON assets(total_tvl_usd);
@@ -56,7 +59,11 @@ CREATE TABLE IF NOT EXISTS pools (
     fee_tier INTEGER NOT NULL,
     total_value_locked_usd REAL NOT NULL,
     volume_usd REAL NOT NULL,
-    created_at INTEGER
+    created_at INTEGER,
+    volume_1d_usd REAL,
+    volume_30d_usd REAL,
+    volume_1d_over_tvl REAL,
+    apr_pool_30d REAL
 );
 CREATE INDEX IF NOT EXISTS idx_pools_symbols ON pools(token0_symbol, token1_symbol);
 CREATE INDEX IF NOT EXISTS idx_pools_tvl ON pools(total_value_locked_usd);
@@ -98,6 +105,17 @@ def init_schema() -> None:
     with _LOCK, _connect() as conn:
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "assets", "total_volume_usd", "REAL NOT NULL DEFAULT 0")
+        # Métricas por janela (volume 1d/30d, vol1d/TVL, APR 30d) -- NULL, não
+        # 0, pra distinguir "não medido" (pools v2, sem poolDayData indexado
+        # com relação reversa no subgraph -- ver index_builder.py) de "medido
+        # e igual a zero" (pool real sem atividade recente). Um filtro
+        # min_* numa coluna NULL nunca casa em SQL (comparação com NULL é
+        # sempre falsa) -- efeito pretendido: filtros dessas métricas excluem
+        # pools/ativos v2 sem essa medição, em vez de tratá-los como "0".
+        for col in ("volume_1d_usd", "volume_30d_usd", "volume_1d_over_tvl", "apr_pool_30d"):
+            _ensure_column(conn, "pools", col, "REAL")
+        for col in ("volume_1d_usd", "volume_30d_usd", "volume_1d_over_tvl"):
+            _ensure_column(conn, "assets", col, "REAL")
         conn.commit()
 
 
@@ -114,6 +132,12 @@ class AssetRecord:
     total_tvl_usd: float
     total_volume_usd: float
     top_pairs: list[dict[str, Any]]
+    # None quando nenhuma das pools desse ativo tem métrica por janela
+    # medida (ex: ativo só aparece em pools v2) -- ver comentário em
+    # init_schema.
+    volume_1d_usd: float | None = None
+    volume_30d_usd: float | None = None
+    volume_1d_over_tvl: float | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +153,12 @@ class PoolRecord:
     total_value_locked_usd: float
     volume_usd: float
     created_at: int | None
+    # None para pools v2 (subgraph não tem relação reversa Pair->PairDayData,
+    # ver index_builder.py) -- não 0, ver comentário em init_schema.
+    volume_1d_usd: float | None = None
+    volume_30d_usd: float | None = None
+    volume_1d_over_tvl: float | None = None
+    apr_pool_30d: float | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +183,9 @@ def _row_to_asset(row: sqlite3.Row) -> AssetRecord:
         total_tvl_usd=row["total_tvl_usd"],
         total_volume_usd=row["total_volume_usd"],
         top_pairs=json.loads(row["top_pairs"]),
+        volume_1d_usd=row["volume_1d_usd"],
+        volume_30d_usd=row["volume_30d_usd"],
+        volume_1d_over_tvl=row["volume_1d_over_tvl"],
     )
 
 
@@ -169,6 +202,10 @@ def _row_to_pool(row: sqlite3.Row) -> PoolRecord:
         total_value_locked_usd=row["total_value_locked_usd"],
         volume_usd=row["volume_usd"],
         created_at=row["created_at"],
+        volume_1d_usd=row["volume_1d_usd"],
+        volume_30d_usd=row["volume_30d_usd"],
+        volume_1d_over_tvl=row["volume_1d_over_tvl"],
+        apr_pool_30d=row["apr_pool_30d"],
     )
 
 
@@ -182,20 +219,24 @@ def replace_index(
         conn.execute("DELETE FROM pools")
         conn.executemany(
             "INSERT INTO assets (id, chain, address, symbol, name, decimals, category, pools_count, "
-            "total_tvl_usd, total_volume_usd, top_pairs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "total_tvl_usd, total_volume_usd, top_pairs, volume_1d_usd, volume_30d_usd, volume_1d_over_tvl) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (a.id, a.chain, a.address, a.symbol, a.name, a.decimals, a.category, a.pools_count,
-                 a.total_tvl_usd, a.total_volume_usd, json.dumps(a.top_pairs))
+                 a.total_tvl_usd, a.total_volume_usd, json.dumps(a.top_pairs),
+                 a.volume_1d_usd, a.volume_30d_usd, a.volume_1d_over_tvl)
                 for a in assets
             ],
         )
         conn.executemany(
             "INSERT INTO pools (id, protocol, chain, token0_symbol, token0_address, token1_symbol, "
-            "token1_address, fee_tier, total_value_locked_usd, volume_usd, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "token1_address, fee_tier, total_value_locked_usd, volume_usd, created_at, "
+            "volume_1d_usd, volume_30d_usd, volume_1d_over_tvl, apr_pool_30d) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (p.id, p.protocol, p.chain, p.token0_symbol, p.token0_address, p.token1_symbol,
-                 p.token1_address, p.fee_tier, p.total_value_locked_usd, p.volume_usd, p.created_at)
+                 p.token1_address, p.fee_tier, p.total_value_locked_usd, p.volume_usd, p.created_at,
+                 p.volume_1d_usd, p.volume_30d_usd, p.volume_1d_over_tvl, p.apr_pool_30d)
                 for p in pools
             ],
         )
@@ -231,9 +272,13 @@ def get_meta() -> IndexMeta:
 
 # Whitelist de colunas ordenáveis -- interpolado direto na query (só depois
 # de validado contra esse set), nunca vem direto da requisição do usuário.
-_ASSET_SORT_COLUMNS = {"symbol", "name", "category", "pools_count", "total_tvl_usd"}
+_ASSET_SORT_COLUMNS = {
+    "symbol", "name", "category", "pools_count", "total_tvl_usd",
+    "volume_1d_usd", "volume_30d_usd", "volume_1d_over_tvl",
+}
 _POOL_SORT_COLUMNS = {
     "protocol", "token0_symbol", "token1_symbol", "fee_tier", "total_value_locked_usd", "volume_usd", "created_at",
+    "volume_1d_usd", "volume_30d_usd", "volume_1d_over_tvl", "apr_pool_30d",
 }
 
 # "Sem atividade" pro filtro hide_inactive -- mesmo critério usado em
@@ -245,6 +290,22 @@ _POOL_SORT_COLUMNS = {
 _MIN_ACTIVE_VOLUME_USD = 0.01
 
 
+def _add_range_filter(
+    where: list[str], params: list[Any], column: str, min_value: float | None, max_value: float | None
+) -> None:
+    """Adiciona `column >= min` / `column <= max` ao WHERE quando informado.
+    Como a coluna pode ser NULL (métrica não medida, ex: pools v2 -- ver
+    init_schema), a comparação SQL padrão já exclui essas linhas sozinha
+    quando qualquer um dos dois limites é passado -- efeito pretendido.
+    """
+    if min_value is not None:
+        where.append(f"{column} >= ?")
+        params.append(min_value)
+    if max_value is not None:
+        where.append(f"{column} <= ?")
+        params.append(max_value)
+
+
 def query_assets(
     q: str | None,
     category: str | None,
@@ -254,6 +315,12 @@ def query_assets(
     order: str,
     limit: int,
     offset: int,
+    min_volume_1d_usd: float | None = None,
+    max_volume_1d_usd: float | None = None,
+    min_volume_30d_usd: float | None = None,
+    max_volume_30d_usd: float | None = None,
+    min_volume_1d_over_tvl: float | None = None,
+    max_volume_1d_over_tvl: float | None = None,
 ) -> tuple[list[AssetRecord], int]:
     sort_col = sort if sort in _ASSET_SORT_COLUMNS else "total_tvl_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -273,6 +340,9 @@ def query_assets(
     if hide_inactive:
         where.append("total_volume_usd >= ?")
         params.append(_MIN_ACTIVE_VOLUME_USD)
+    _add_range_filter(where, params, "volume_1d_usd", min_volume_1d_usd, max_volume_1d_usd)
+    _add_range_filter(where, params, "volume_30d_usd", min_volume_30d_usd, max_volume_30d_usd)
+    _add_range_filter(where, params, "volume_1d_over_tvl", min_volume_1d_over_tvl, max_volume_1d_over_tvl)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     init_schema()
@@ -307,6 +377,14 @@ def query_pools(
     order: str,
     limit: int,
     offset: int,
+    min_volume_1d_usd: float | None = None,
+    max_volume_1d_usd: float | None = None,
+    min_volume_30d_usd: float | None = None,
+    max_volume_30d_usd: float | None = None,
+    min_volume_1d_over_tvl: float | None = None,
+    max_volume_1d_over_tvl: float | None = None,
+    min_apr_pool_30d: float | None = None,
+    max_apr_pool_30d: float | None = None,
 ) -> tuple[list[PoolRecord], int]:
     sort_col = sort if sort in _POOL_SORT_COLUMNS else "total_value_locked_usd"
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -345,6 +423,10 @@ def query_pools(
     if hide_inactive:
         where.append("volume_usd >= ?")
         params.append(_MIN_ACTIVE_VOLUME_USD)
+    _add_range_filter(where, params, "volume_1d_usd", min_volume_1d_usd, max_volume_1d_usd)
+    _add_range_filter(where, params, "volume_30d_usd", min_volume_30d_usd, max_volume_30d_usd)
+    _add_range_filter(where, params, "volume_1d_over_tvl", min_volume_1d_over_tvl, max_volume_1d_over_tvl)
+    _add_range_filter(where, params, "apr_pool_30d", min_apr_pool_30d, max_apr_pool_30d)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     init_schema()

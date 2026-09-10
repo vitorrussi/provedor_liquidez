@@ -3,11 +3,29 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import type { IndexStatusResponse, PoolIndexRow, Protocol } from '../api/types';
 import { IndexRefreshBar } from '../components/IndexRefreshBar';
+import { RangeFilter } from '../components/RangeFilter';
 import { SortableHeader } from '../components/SortableHeader';
-import { formatFeeTier, formatUsd, protocolLabel } from '../format';
+import { formatFeeTier, formatRatio, formatUsd, protocolLabel } from '../format';
 
-type SortKey = 'token0_symbol' | 'protocol' | 'fee_tier' | 'total_value_locked_usd' | 'volume_usd' | 'created_at';
+type SortKey =
+  | 'token0_symbol'
+  | 'protocol'
+  | 'fee_tier'
+  | 'total_value_locked_usd'
+  | 'volume_usd'
+  | 'created_at'
+  | 'volume_1d_usd'
+  | 'volume_30d_usd'
+  | 'volume_1d_over_tvl'
+  | 'apr_pool_30d';
 type SortDirection = 'asc' | 'desc';
+
+// String vazia == sem filtro (undefined na chamada à API); Number(str) de
+// string vazia daria 0, que é um mínimo/máximo válido diferente de "sem
+// filtro" -- por isso essa conversão explícita em vez de `Number(v) || undefined`.
+function toFilterNumber(value: string): number | undefined {
+  return value.trim() === '' ? undefined : Number(value);
+}
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome'];
@@ -28,6 +46,24 @@ export function PoolsIndexPage() {
   const [protocol, setProtocol] = useState('');
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
+
+  const [minVol1dInput, setMinVol1dInput] = useState('');
+  const [maxVol1dInput, setMaxVol1dInput] = useState('');
+  const [minVol30dInput, setMinVol30dInput] = useState('');
+  const [maxVol30dInput, setMaxVol30dInput] = useState('');
+  const [minVol1dTvlInput, setMinVol1dTvlInput] = useState('');
+  const [maxVol1dTvlInput, setMaxVol1dTvlInput] = useState('');
+  const [minAprInput, setMinAprInput] = useState('');
+  const [maxAprInput, setMaxAprInput] = useState('');
+  const [minVol1d, setMinVol1d] = useState('');
+  const [maxVol1d, setMaxVol1d] = useState('');
+  const [minVol30d, setMinVol30d] = useState('');
+  const [maxVol30d, setMaxVol30d] = useState('');
+  const [minVol1dTvl, setMinVol1dTvl] = useState('');
+  const [maxVol1dTvl, setMaxVol1dTvl] = useState('');
+  const [minApr, setMinApr] = useState('');
+  const [maxApr, setMaxApr] = useState('');
+
   const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>('total_value_locked_usd');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -43,10 +79,30 @@ export function PoolsIndexPage() {
       setQ(qInput.trim());
       setTokenA(tokenAInput.trim());
       setTokenB(tokenBInput.trim());
+      setMinVol1d(minVol1dInput);
+      setMaxVol1d(maxVol1dInput);
+      setMinVol30d(minVol30dInput);
+      setMaxVol30d(maxVol30dInput);
+      setMinVol1dTvl(minVol1dTvlInput);
+      setMaxVol1dTvl(maxVol1dTvlInput);
+      setMinApr(minAprInput);
+      setMaxApr(maxAprInput);
       setOffset(0);
     }, 250);
     return () => clearTimeout(timer);
-  }, [qInput, tokenAInput, tokenBInput]);
+  }, [
+    qInput,
+    tokenAInput,
+    tokenBInput,
+    minVol1dInput,
+    maxVol1dInput,
+    minVol30dInput,
+    maxVol30dInput,
+    minVol1dTvlInput,
+    maxVol1dTvlInput,
+    minAprInput,
+    maxAprInput,
+  ]);
 
   useEffect(() => {
     api
@@ -69,6 +125,17 @@ export function PoolsIndexPage() {
       order: sortDirection,
       limit: pageSize,
       offset: currentOffset,
+      minVolume1dUsd: toFilterNumber(minVol1d),
+      maxVolume1dUsd: toFilterNumber(maxVol1d),
+      minVolume30dUsd: toFilterNumber(minVol30d),
+      maxVolume30dUsd: toFilterNumber(maxVol30d),
+      minVolume1dOverTvl: toFilterNumber(minVol1dTvl),
+      maxVolume1dOverTvl: toFilterNumber(maxVol1dTvl),
+      // APR digitado em % (ex: "5" = 5%) -- convertido pra fração porque é
+      // assim que apr_pool_30d é armazenado/filtrado no backend (mesma
+      // convenção de formatPercent em format.ts).
+      minAprPool30d: toFilterNumber(minApr) !== undefined ? Number(minApr) / 100 : undefined,
+      maxAprPool30d: toFilterNumber(maxApr) !== undefined ? Number(maxApr) / 100 : undefined,
     });
   }
 
@@ -92,7 +159,26 @@ export function PoolsIndexPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, tokenA, tokenB, exact, hideInactive, protocol, pageSize, sortKey, sortDirection, offset]);
+  }, [
+    q,
+    tokenA,
+    tokenB,
+    exact,
+    hideInactive,
+    protocol,
+    pageSize,
+    sortKey,
+    sortDirection,
+    offset,
+    minVol1d,
+    maxVol1d,
+    minVol30d,
+    maxVol30d,
+    minVol1dTvl,
+    maxVol1dTvl,
+    minApr,
+    maxApr,
+  ]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -195,6 +281,36 @@ export function PoolsIndexPage() {
           />
           Ocultar sem atividade
         </label>
+        <RangeFilter
+          label="Volume 1d (USD)"
+          min={minVol1dInput}
+          max={maxVol1dInput}
+          onMinChange={setMinVol1dInput}
+          onMaxChange={setMaxVol1dInput}
+        />
+        <RangeFilter
+          label="Volume 30d (USD)"
+          min={minVol30dInput}
+          max={maxVol30dInput}
+          onMinChange={setMinVol30dInput}
+          onMaxChange={setMaxVol30dInput}
+        />
+        <RangeFilter
+          label="Vol. 1d/TVL"
+          title="Volume de 1 dia dividido pelo TVL"
+          min={minVol1dTvlInput}
+          max={maxVol1dTvlInput}
+          onMinChange={setMinVol1dTvlInput}
+          onMaxChange={setMaxVol1dTvlInput}
+        />
+        <RangeFilter
+          label="APR da pool (%)"
+          title="APR de taxas full-range dos últimos ~30 dias"
+          min={minAprInput}
+          max={maxAprInput}
+          onMinChange={setMinAprInput}
+          onMaxChange={setMaxAprInput}
+        />
         <label>
           Itens por página
           <select
@@ -218,6 +334,12 @@ export function PoolsIndexPage() {
           enquanto os dois campos de par estiverem preenchidos.
         </p>
       )}
+      {(minVol1d || maxVol1d || minVol30d || maxVol30d || minVol1dTvl || maxVol1dTvl || minApr || maxApr) && (
+        <p className="footnote">
+          Volume 1d/30d, Vol. 1d/TVL e APR não são medidos para pools Uniswap v2 (o subgraph não indexa esse
+          histórico por pool) — com qualquer um desses filtros preenchido, pools v2 ficam de fora da lista.
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -230,6 +352,33 @@ export function PoolsIndexPage() {
               <SortableHeader className="pool-list__col" label="Taxa" sortKey="fee_tier" activeKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader className="pool-list__col" label="TVL" sortKey="total_value_locked_usd" activeKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader className="pool-list__col" label="Volume (total)" sortKey="volume_usd" activeKey={sortKey} direction={sortDirection} onSort={handleSort} />
+              <SortableHeader
+                className="pool-list__col"
+                label="Vol. 1d"
+                title="Volume de trocas do dia mais recente com dados -- não medido para v2"
+                sortKey="volume_1d_usd"
+                activeKey={sortKey}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                className="pool-list__col"
+                label="Vol. 30d"
+                title="Soma do volume de trocas dos últimos ~30 dias -- não medido para v2"
+                sortKey="volume_30d_usd"
+                activeKey={sortKey}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                className="pool-list__col"
+                label="Vol. 1d/TVL"
+                title="Volume de 1 dia dividido pelo TVL -- não medido para v2"
+                sortKey="volume_1d_over_tvl"
+                activeKey={sortKey}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
               <SortableHeader className="pool-list__col" label="Criado em" sortKey="created_at" activeKey={sortKey} direction={sortDirection} onSort={handleSort} />
             </div>
 
@@ -250,6 +399,11 @@ export function PoolsIndexPage() {
                   <span className="pool-list__col">{formatFeeTier(pool.fee_tier)}</span>
                   <span className="pool-list__col">{formatUsd(pool.total_value_locked_usd)}</span>
                   <span className="pool-list__col">{formatUsd(pool.volume_usd)}</span>
+                  <span className="pool-list__col">{pool.volume_1d_usd !== null ? formatUsd(pool.volume_1d_usd) : '—'}</span>
+                  <span className="pool-list__col">{pool.volume_30d_usd !== null ? formatUsd(pool.volume_30d_usd) : '—'}</span>
+                  <span className="pool-list__col">
+                    {pool.volume_1d_over_tvl !== null ? formatRatio(pool.volume_1d_over_tvl) : '—'}
+                  </span>
                   <span className="pool-list__col muted">
                     {pool.created_at !== null ? new Date(pool.created_at * 1000).toLocaleDateString('pt-BR') : '—'}
                   </span>

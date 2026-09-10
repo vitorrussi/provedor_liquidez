@@ -31,6 +31,9 @@ def _asset_to_row(a: local_db.AssetRecord) -> AssetIndexRow:
         total_tvl_usd=a.total_tvl_usd,
         total_volume_usd=a.total_volume_usd,
         top_pairs=[AssetTopPair(**p) for p in a.top_pairs],
+        volume_1d_usd=a.volume_1d_usd,
+        volume_30d_usd=a.volume_30d_usd,
+        volume_1d_over_tvl=a.volume_1d_over_tvl,
     )
 
 
@@ -47,6 +50,10 @@ def _pool_to_row(p: local_db.PoolRecord) -> PoolIndexRow:
         total_value_locked_usd=p.total_value_locked_usd,
         volume_usd=p.volume_usd,
         created_at=p.created_at,
+        volume_1d_usd=p.volume_1d_usd,
+        volume_30d_usd=p.volume_30d_usd,
+        volume_1d_over_tvl=p.volume_1d_over_tvl,
+        apr_pool_30d=p.apr_pool_30d,
     )
 
 
@@ -87,9 +94,19 @@ async def list_assets(
     order: str = "desc",
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    min_volume_1d_usd: float | None = Query(None, ge=0),
+    max_volume_1d_usd: float | None = Query(None, ge=0),
+    min_volume_30d_usd: float | None = Query(None, ge=0),
+    max_volume_30d_usd: float | None = Query(None, ge=0),
+    min_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    max_volume_1d_over_tvl: float | None = Query(None, ge=0),
 ):
     items, total = await asyncio.to_thread(
-        local_db.query_assets, q, category, exact, hide_inactive, sort, order, limit, offset
+        local_db.query_assets,
+        q, category, exact, hide_inactive, sort, order, limit, offset,
+        min_volume_1d_usd, max_volume_1d_usd,
+        min_volume_30d_usd, max_volume_30d_usd,
+        min_volume_1d_over_tvl, max_volume_1d_over_tvl,
     )
     return AssetIndexResponse(items=[_asset_to_row(a) for a in items], total=total)
 
@@ -115,10 +132,23 @@ async def list_pools_index(
     order: str = "desc",
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    min_volume_1d_usd: float | None = Query(None, ge=0),
+    max_volume_1d_usd: float | None = Query(None, ge=0),
+    min_volume_30d_usd: float | None = Query(None, ge=0),
+    max_volume_30d_usd: float | None = Query(None, ge=0),
+    min_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    max_volume_1d_over_tvl: float | None = Query(None, ge=0),
+    min_apr_pool_30d: float | None = Query(None),
+    max_apr_pool_30d: float | None = Query(None),
 ):
     if protocol is not None and protocol not in _VALID_PROTOCOLS:
         raise HTTPException(status_code=400, detail=f"Protocolo inválido: {protocol}")
     items, total = await asyncio.to_thread(
-        local_db.query_pools, q, token_a, token_b, exact, hide_inactive, protocol, sort, order, limit, offset
+        local_db.query_pools,
+        q, token_a, token_b, exact, hide_inactive, protocol, sort, order, limit, offset,
+        min_volume_1d_usd, max_volume_1d_usd,
+        min_volume_30d_usd, max_volume_30d_usd,
+        min_volume_1d_over_tvl, max_volume_1d_over_tvl,
+        min_apr_pool_30d, max_apr_pool_30d,
     )
     return PoolIndexResponse(items=[_pool_to_row(p) for p in items], total=total)

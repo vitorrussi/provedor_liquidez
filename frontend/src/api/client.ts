@@ -104,6 +104,12 @@ export const api = {
     order?: 'asc' | 'desc';
     limit?: number;
     offset?: number;
+    minVolume1dUsd?: number;
+    maxVolume1dUsd?: number;
+    minVolume30dUsd?: number;
+    maxVolume30dUsd?: number;
+    minVolume1dOverTvl?: number;
+    maxVolume1dOverTvl?: number;
   }) =>
     request<AssetIndexResponse>(
       `/api/index/assets?${buildQuery({
@@ -115,6 +121,12 @@ export const api = {
         order: params.order,
         limit: params.limit,
         offset: params.offset,
+        min_volume_1d_usd: params.minVolume1dUsd,
+        max_volume_1d_usd: params.maxVolume1dUsd,
+        min_volume_30d_usd: params.minVolume30dUsd,
+        max_volume_30d_usd: params.maxVolume30dUsd,
+        min_volume_1d_over_tvl: params.minVolume1dOverTvl,
+        max_volume_1d_over_tvl: params.maxVolume1dOverTvl,
       })}`,
     ),
 
@@ -132,6 +144,14 @@ export const api = {
     order?: 'asc' | 'desc';
     limit?: number;
     offset?: number;
+    minVolume1dUsd?: number;
+    maxVolume1dUsd?: number;
+    minVolume30dUsd?: number;
+    maxVolume30dUsd?: number;
+    minVolume1dOverTvl?: number;
+    maxVolume1dOverTvl?: number;
+    minAprPool30d?: number;
+    maxAprPool30d?: number;
   }) =>
     request<PoolIndexResponse>(
       `/api/index/pools?${buildQuery({
@@ -145,6 +165,14 @@ export const api = {
         order: params.order,
         limit: params.limit,
         offset: params.offset,
+        min_volume_1d_usd: params.minVolume1dUsd,
+        max_volume_1d_usd: params.maxVolume1dUsd,
+        min_volume_30d_usd: params.minVolume30dUsd,
+        max_volume_30d_usd: params.maxVolume30dUsd,
+        min_volume_1d_over_tvl: params.minVolume1dOverTvl,
+        max_volume_1d_over_tvl: params.maxVolume1dOverTvl,
+        min_apr_pool_30d: params.minAprPool30d,
+        max_apr_pool_30d: params.maxAprPool30d,
       })}`,
     ),
 };

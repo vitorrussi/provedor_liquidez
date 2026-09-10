@@ -734,8 +734,8 @@ body {
 
 .pool-list__header--pools-index,
 .pool-list__item--pools-index {
-  grid-template-columns: minmax(170px, 1.6fr) repeat(5, minmax(90px, 1fr));
-  min-width: 720px;
+  grid-template-columns: minmax(170px, 1.6fr) repeat(8, minmax(90px, 1fr));
+  min-width: 990px;
 }
 
 .pool-list__item--static {
@@ -829,4 +829,32 @@ body {
 
 .advanced-filters__hint {
   margin: 0;
+}
+
+.advanced-filters__range {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.advanced-filters__range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.advanced-filters__range-inputs input {
+  width: 90px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.advanced-filters__range-sep {
+  color: var(--muted);
 }

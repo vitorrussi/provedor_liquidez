@@ -3,11 +3,17 @@ import { Link } from 'react-router-dom';
 import { api, ApiError } from '../api/client';
 import type { AssetIndexRow, IndexStatusResponse } from '../api/types';
 import { IndexRefreshBar } from '../components/IndexRefreshBar';
+import { RangeFilter } from '../components/RangeFilter';
 import { SortableHeader } from '../components/SortableHeader';
 import { ASSET_CATEGORIES, formatUsd } from '../format';
 
 type SortKey = 'symbol' | 'name' | 'category' | 'pools_count' | 'total_tvl_usd';
 type SortDirection = 'asc' | 'desc';
+
+// String vazia == sem filtro -- ver mesma função em PoolsIndexPage.tsx.
+function toFilterNumber(value: string): number | undefined {
+  return value.trim() === '' ? undefined : Number(value);
+}
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
@@ -21,6 +27,20 @@ export function AssetsPage() {
   const [category, setCategory] = useState('');
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
+
+  const [minVol1dInput, setMinVol1dInput] = useState('');
+  const [maxVol1dInput, setMaxVol1dInput] = useState('');
+  const [minVol30dInput, setMinVol30dInput] = useState('');
+  const [maxVol30dInput, setMaxVol30dInput] = useState('');
+  const [minVol1dTvlInput, setMinVol1dTvlInput] = useState('');
+  const [maxVol1dTvlInput, setMaxVol1dTvlInput] = useState('');
+  const [minVol1d, setMinVol1d] = useState('');
+  const [maxVol1d, setMaxVol1d] = useState('');
+  const [minVol30d, setMinVol30d] = useState('');
+  const [maxVol30d, setMaxVol30d] = useState('');
+  const [minVol1dTvl, setMinVol1dTvl] = useState('');
+  const [maxVol1dTvl, setMaxVol1dTvl] = useState('');
+
   const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>('total_tvl_usd');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -34,10 +54,16 @@ export function AssetsPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setQ(qInput.trim());
+      setMinVol1d(minVol1dInput);
+      setMaxVol1d(maxVol1dInput);
+      setMinVol30d(minVol30dInput);
+      setMaxVol30d(maxVol30dInput);
+      setMinVol1dTvl(minVol1dTvlInput);
+      setMaxVol1dTvl(maxVol1dTvlInput);
       setOffset(0);
     }, 250);
     return () => clearTimeout(timer);
-  }, [qInput]);
+  }, [qInput, minVol1dInput, maxVol1dInput, minVol30dInput, maxVol30dInput, minVol1dTvlInput, maxVol1dTvlInput]);
 
   function loadStatus() {
     api
@@ -62,6 +88,12 @@ export function AssetsPage() {
       order: sortDirection,
       limit: pageSize,
       offset: currentOffset,
+      minVolume1dUsd: toFilterNumber(minVol1d),
+      maxVolume1dUsd: toFilterNumber(maxVol1d),
+      minVolume30dUsd: toFilterNumber(minVol30d),
+      maxVolume30dUsd: toFilterNumber(maxVol30d),
+      minVolume1dOverTvl: toFilterNumber(minVol1dTvl),
+      maxVolume1dOverTvl: toFilterNumber(maxVol1dTvl),
     });
   }
 
@@ -85,7 +117,22 @@ export function AssetsPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, category, exact, hideInactive, pageSize, sortKey, sortDirection, offset]);
+  }, [
+    q,
+    category,
+    exact,
+    hideInactive,
+    pageSize,
+    sortKey,
+    sortDirection,
+    offset,
+    minVol1d,
+    maxVol1d,
+    minVol30d,
+    maxVol30d,
+    minVol1dTvl,
+    maxVol1dTvl,
+  ]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -181,6 +228,30 @@ export function AssetsPage() {
           />
           Ocultar sem atividade
         </label>
+        <RangeFilter
+          label="Volume 1d (USD)"
+          title="Soma do volume de 1 dia das pools onde o ativo aparece"
+          min={minVol1dInput}
+          max={maxVol1dInput}
+          onMinChange={setMinVol1dInput}
+          onMaxChange={setMaxVol1dInput}
+        />
+        <RangeFilter
+          label="Volume 30d (USD)"
+          title="Soma do volume de 30 dias das pools onde o ativo aparece"
+          min={minVol30dInput}
+          max={maxVol30dInput}
+          onMinChange={setMinVol30dInput}
+          onMaxChange={setMaxVol30dInput}
+        />
+        <RangeFilter
+          label="Vol. 1d/TVL"
+          title="Volume de 1 dia dividido pelo TVL total do ativo"
+          min={minVol1dTvlInput}
+          max={maxVol1dTvlInput}
+          onMinChange={setMinVol1dTvlInput}
+          onMaxChange={setMaxVol1dTvlInput}
+        />
         <label>
           Itens por página
           <select
@@ -198,6 +269,13 @@ export function AssetsPage() {
           </select>
         </label>
       </div>
+      {(minVol1d || maxVol1d || minVol30d || maxVol30d || minVol1dTvl || maxVol1dTvl) && (
+        <p className="footnote">
+          Volume 1d/30d e Vol. 1d/TVL não são medidos para ativos que só aparecem em pools Uniswap v2 (o subgraph
+          não indexa esse histórico por pool) — com qualquer um desses filtros preenchido, esses ativos ficam de
+          fora da lista.
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 

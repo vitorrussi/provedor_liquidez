@@ -156,12 +156,36 @@ a cada tecla digitada, já que consulta só o SQLite local.
 **Não atualiza sozinho.** Só quando alguém clica em "Atualizar lista" (`POST /api/index/refresh`,
 `IndexRefreshBar.tsx`, usado em ambas as páginas) é que `services/index_builder.py` faz um crawl
 completo dos 4 subgraphs (em paralelo) e substitui o conteúdo inteiro das tabelas de uma vez. Motivo
-de ser manual: com o piso de $1k, o total observado em 2026-09-09 foi **~35 mil ativos / ~42 mil
-pools**, exigindo ~60-90 consultas ao gateway e ~30-40s de execução -- barato o bastante pra não
-importar (uma fração de 1% da cota mensal de 100k), mas caro o bastante pra não rodar a cada
+de ser manual: com o piso de $1k, o total observado em 2026-09-10 foi **~35 mil ativos / ~42 mil
+pools**, exigindo ~90-150 consultas ao gateway e **~4 minutos** de execução (crawl de v3/v4/aerodrome
+inclui `poolDayData` aninhado por pool, ver abaixo) -- barato o bastante em cota pra não importar
+(uma fração pequena da cota mensal de 100k), mas caro o bastante em tempo pra não rodar a cada
 carregamento de página. A paginação usa cursor (`id_gt`), não `skip`/`offset` -- o Graph limita
 `skip` a 5000 e a v3 mainnet sozinha já passa disso com folga (~7900 pools com TVL >= $1k, medido
-antes desse teto entrar em vigor).
+antes desse teto entrar em vigor). `_PAGE_SIZE` é 500 (não 1.000) desde que o crawl passou a incluir
+`poolDayData` aninhado -- achado real em 2026-09-10: com `first: 1000` e 30 dias aninhados por pool
+(até 30 mil entidades por página), um crawl de v3 falhou com "bad indexers: Timeout/Unavailable" no
+gateway; página menor reduz o payload por requisição e a chance de bater nisso, ao custo do dobro de
+páginas (`_MAX_PAGES` dobrado também, mesmo teto total de pools).
+
+**Volume 1d/30d, Vol. 1d/TVL e APR (30d) por pool/ativo** (colunas em `/pools`, filtros em
+`/pools`/`/assets`/busca principal) vêm do crawl, não de uma consulta extra: `poolDayData` é um campo
+derivado (`@derivedFrom`) do schema do `Pool` em v3/v4/Aerodrome, então pedir
+`poolDayData(first: 30, orderBy: date, orderDirection: desc) { date volumeUSD feesUSD }` aninhado
+dentro da própria query de crawl (`_INDEX_POOLS_QUERY`) traz os últimos 30 dias de cada pool na MESMA
+chamada ao gateway, sem custo extra de cota -- confirmado por introspecção e teste ao vivo em
+2026-09-10. **v2 não participa** -- `PairDayData` não tem relação reversa pra `Pair` no schema do
+subgraph comunitário da Uniswap (só o endereço cru em `pairAddress`, sem campo `pair`), então não há
+como pedir isso aninhado; replicar via uma segunda rodada de consultas em lote (como
+`_fetch_recent_day_data_batch` já faz pra enriquecer resultados de busca, só que pra ~30 mil pools
+v2 de uma vez) seria caro demais pro refresh manual. Por isso essas quatro colunas ficam **NULL**
+(não 0) pra pools/ativos v2 -- ver comentário em `local_db.init_schema` sobre por que é NULL e não
+0 (0 seria indistinguível de "medido e sem atividade", e corromperia ordenação/filtro por essas
+colunas). Um filtro `min_*`/`max_*` nessas colunas exclui silenciosamente pools/ativos v2 (comparação
+SQL com NULL nunca é verdadeira) -- o frontend mostra um aviso disso quando algum desses filtros está
+preenchido em `/pools`/`/assets`. Pra ativos, `volume_1d_usd`/`volume_30d_usd` são a soma dessas
+métricas das pools onde o ativo aparece que TÊM a métrica medida (só v3/v4/Aerodrome contribuem); um
+ativo fica com essas colunas NULL só se TODAS as suas pools forem v2.
 
 Se algum dos 4 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
 parcialmente atualizado, não é tudo-ou-nada) e o motivo fica em `protocol_errors` na resposta --

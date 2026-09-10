@@ -119,6 +119,11 @@ export interface AssetIndexRow {
   total_tvl_usd: number;
   total_volume_usd: number;
   top_pairs: AssetTopPair[];
+  // null quando nenhuma pool desse ativo tem a métrica medida (ativo só
+  // aparece em pools v2, sem poolDayData indexado -- ver CLAUDE.md).
+  volume_1d_usd: number | null;
+  volume_30d_usd: number | null;
+  volume_1d_over_tvl: number | null;
 }
 
 export interface AssetIndexResponse {
@@ -138,6 +143,11 @@ export interface PoolIndexRow {
   total_value_locked_usd: number;
   volume_usd: number;
   created_at: number | null;
+  // null para pools v2 (sem poolDayData indexado -- ver CLAUDE.md).
+  volume_1d_usd: number | null;
+  volume_30d_usd: number | null;
+  volume_1d_over_tvl: number | null;
+  apr_pool_30d: number | null;
 }
 
 export interface PoolIndexResponse {
