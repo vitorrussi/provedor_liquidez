@@ -160,6 +160,11 @@ graciosamente pra v4** -- confirmado em 2026-09-10: uma query sem `where` de TVL
 índice, `_INDEX_POOLS_QUERY`) respondeu em segundos. Já é coberto pela mesma degradação graciosa que
 protege contra a lentidão da v4 (`return_exceptions=True`, isolamento por protocolo) -- só documentado
 aqui pra não ser confundido com um bug nesse protocolo especificamente se notado de novo.
+**Consequência contraintuitiva pro usuário**: é o oposto do que se esperaria de um filtro -- deixar
+"TVL mínimo" vazio na busca principal tende a ESCONDER resultados de Polygon (a query sem `where`
+estoura o timeout), enquanto preencher um piso de TVL tende a REVELAR mais resultados de Polygon (a
+query fica rápida o bastante pra não estourar). Se um usuário reportar "Polygon não aparece nunca
+nessa busca", a primeira pergunta é se ele tem algum piso de TVL configurado nos filtros avançados.
 
 **Chains pedidas mas NÃO implementadas ainda** (avaliadas e descartadas por ora, não esquecidas):
 BNB Chain/BSC (a presença da Uniswap lá é pequena -- PancakeSwap domina, e teria schema diferente,
@@ -225,8 +230,20 @@ Além da busca ao vivo no Graph (`/api/pools/search`), o app mantém um índice 
 `Settings.index_min_tvl_usd`, default $1.000 -- mesmo piso já usado em `get_related_pools`). Serve
 três coisas: as páginas `/assets` e `/pools` (tabelas ordenáveis/filtráveis/paginadas server-side, ver
 `routers/local_index.py`), e o autocomplete do campo de busca principal
-(`GET /api/index/assets/suggest`, usado por `PoolSearch.tsx`) -- que por isso não gasta cota do Graph
-a cada tecla digitada, já que consulta só o SQLite local.
+(`GET /api/index/assets/suggest`, usado por `PoolSearch.tsx` e `TokenMultiSelect.tsx`) -- que por
+isso não gasta cota do Graph a cada tecla digitada, já que consulta só o SQLite local.
+
+**`suggest_assets` (`local_db.py`) agrupa por `symbol`, mantendo só a linha de maior TVL de cada
+grupo.** Achado real ao adicionar Polygon/Avalanche em 2026-09-10: sem agrupar, um símbolo popular
+(USDC, WETH) passou a aparecer até 4x no mesmo dropdown (uma linha por chain) -- com o `limit` padrão
+de 8, isso chegou a consumir 6 das 8 posições pra "USDC", escondendo símbolos de verdade diferentes
+(ex: USDCV, ou tokens homônimos falsos que `_is_plausible_pool`/categoria não filtram porque isso é
+autocomplete de ativo, não de pool). Não perde nenhuma chain da busca em si -- todo o resto do fluxo
+(clique na sugestão, chip do `TokenMultiSelect`) já seleciona por `symbol`, não por `chain`
+específica, então mostrar só a linha de maior TVL por símbolo é estritamente melhor pra
+descoberta sem mudar o que a busca resultante inclui. As linhas de sugestão mostram a rede
+(`formatChainLabel(asset.chain)`) pra deixar claro que aquele resultado é cross-chain, mesmo já
+agrupado.
 
 **Não atualiza sozinho.** Só quando alguém clica em "Atualizar lista" (`POST /api/index/refresh`,
 `IndexRefreshBar.tsx`, usado em ambas as páginas) é que `services/index_builder.py` faz um crawl

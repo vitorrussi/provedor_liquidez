@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { AssetIndexRow } from '../api/types';
+import { formatChainLabel } from '../format';
 
 interface TokenMultiSelectProps {
   label: string;
@@ -96,6 +97,7 @@ export function TokenMultiSelect({ label, placeholder, selected, onChange }: Tok
                 <button type="button" onMouseDown={() => addToken(asset.symbol)}>
                   <span className="pool-search__suggestion-symbol">{asset.symbol}</span>
                   <span className="pool-search__suggestion-name muted">{asset.name}</span>
+                  <span className="badge">{formatChainLabel(asset.chain)}</span>
                   {asset.category && <span className="badge">{asset.category}</span>}
                 </button>
               </li>

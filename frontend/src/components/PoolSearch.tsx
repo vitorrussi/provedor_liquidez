@@ -263,6 +263,7 @@ export function PoolSearch() {
                   <button type="button" onMouseDown={() => handleSuggestionSelect(asset)}>
                     <span className="pool-search__suggestion-symbol">{asset.symbol}</span>
                     <span className="pool-search__suggestion-name muted">{asset.name}</span>
+                    <span className="badge">{formatChainLabel(asset.chain)}</span>
                     {asset.category && <span className="badge">{asset.category}</span>}
                     <span className="pool-search__suggestion-tvl muted">{formatUsd(asset.total_tvl_usd)}</span>
                   </button>

@@ -360,11 +360,30 @@ def query_assets(
 
 
 def suggest_assets(prefix: str, limit: int) -> list[AssetRecord]:
+    # Com 4 chains, um símbolo popular (USDC, WETH) agora aparece até 4x --
+    # sem agrupar por symbol, esses duplicados dominavam o `limit` (8 por
+    # padrão) e escondiam símbolos de verdade diferentes (achado real:
+    # prefixo "USDC" devolvia 6 linhas "USDC" de chains distintas antes das
+    # duas únicas linhas realmente diferentes, USDCV e um token falso). Cada
+    # symbol aparece só uma vez aqui (a linha de maior TVL entre as chains) --
+    # o resto da UI (busca, TokenMultiSelect) já trata seleção por símbolo,
+    # não por chain específica, então isso não perde nenhuma chain da busca
+    # em si, só evita repetir o mesmo símbolo várias vezes na lista de sugestões.
     init_schema()
     like = f"{prefix}%"
     with _LOCK, _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM assets WHERE symbol LIKE ? ORDER BY total_tvl_usd DESC LIMIT ?",
+            """
+            SELECT a.* FROM assets a
+            JOIN (
+                SELECT symbol, MAX(total_tvl_usd) AS max_tvl
+                FROM assets
+                WHERE symbol LIKE ?
+                GROUP BY symbol
+            ) best ON a.symbol = best.symbol AND a.total_tvl_usd = best.max_tvl
+            ORDER BY a.total_tvl_usd DESC
+            LIMIT ?
+            """,
             (like, limit),
         ).fetchall()
     return [_row_to_asset(r) for r in rows]
