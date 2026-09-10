@@ -76,25 +76,43 @@ export interface ImpermanentLossResponse {
   concentration_multiplier: number;
 }
 
-export interface RangeSimulationRequest {
+export interface RangeAnalysisRequest {
   pool_id: string;
   price_lower: number;
   price_upper: number;
   entry_price?: number;
+  investment_usd?: number;
   history_days?: number;
+  include_suggested?: boolean;
 }
 
-export interface RangeSimulationResponse {
+export type RangeScenarioKey = 'custom' | 'narrow' | 'medium' | 'wide' | 'realized';
+
+export interface RangeScenario {
+  key: RangeScenarioKey;
+  price_lower: number;
+  price_upper: number;
   in_range_fraction: number;
   concentration_multiplier: number;
-  fee_apr_full_range: number;
   estimated_position_apr: number;
   impermanent_loss: number;
   breakeven_days: number | null;
   entry_price: number;
   end_price: number;
-  sample_count: number;
+}
+
+export interface RangeAnalysisResponse {
+  current_price: number;
+  // Preço de entrada e janela histórica REALMENTE usados no replay (já
+  // resolvidos/clampados no backend) -- use estes, não o que foi enviado no
+  // request, pra qualquer cálculo derivado (ex: escalar APR por dias).
+  entry_price: number;
+  history_days: number;
+  fee_apr_full_range: number;
   annualized_volatility: number;
+  sample_count: number;
+  daily_history: DayDataPoint[];
+  scenarios: RangeScenario[];
 }
 
 export interface GraphUsageResponse {

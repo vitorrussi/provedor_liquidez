@@ -5,6 +5,7 @@ import { UsageBadge } from './components/UsageBadge';
 import { AssetsPage } from './pages/AssetsPage';
 import { PoolPage } from './pages/PoolPage';
 import { PoolsIndexPage } from './pages/PoolsIndexPage';
+import { RangeAnalysisPage } from './pages/RangeAnalysisPage';
 
 const WIDE_PATH_PREFIXES = ['/pool/', '/assets', '/pools'];
 
@@ -28,6 +29,7 @@ function App() {
         <Routes>
           <Route path="/" element={<PoolSearch />} />
           <Route path="/pool/:id" element={<PoolPage />} />
+          <Route path="/pool/:id/simulate" element={<RangeAnalysisPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/pools" element={<PoolsIndexPage />} />
         </Routes>

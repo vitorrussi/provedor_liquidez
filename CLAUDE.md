@@ -223,6 +223,64 @@ desse sentinel.
 sem ele, um pool com TVL de poucos dólares e algum volume registrado produz um "APR" de milhares de
 por cento, tecnicamente correto pela conta mas sem nenhum valor informativo.
 
+## Análise avançada de faixa (`/pool/:id/simulate`)
+
+O antigo card "Simulador de faixa" (uma faixa por vez, dentro de `/pool/:id`) foi substituído por
+uma página própria (`frontend/src/pages/RangeAnalysisPage.tsx`, rota `/pool/:id/simulate`, linkada
+por um card-teaser em `PoolPage.tsx` -- só aparece pra `pool.protocol !== 'v2'`, mesma regra de
+antes) que compara **várias faixas de uma vez**: a que o usuário digitar ("custom") + 4 sugeridas
+(estreita/média/larga por volatilidade + uma pela variação de preço realizada), com tabela
+comparativa ordenável, gráfico de preço com as faixas sobrepostas (`RangeAnalysisChart.tsx`) e
+gráfico de barras APR×IL (`RangeAprIlChart.tsx`). Não se aplica a v2 pelo mesmo motivo de sempre
+(sem liquidez concentrada, sem série horária -- `get_pool_hour_data` já lança `GraphQueryError`
+pra v2).
+
+**Endpoint único, sem multiplicar custo de cota por faixa**: `POST /api/indicators/range-analysis`
+(`routers/indicators.py::analyze_range`, substituiu o antigo `range-simulate`/`simulate_range` --
+schemas `RangeAnalysisRequest`/`RangeAnalysisResponse`/`RangeScenario` em `schemas.py`) busca o
+histórico horário + diário + detalhe do pool **uma única vez** e roda
+`indicators.replay_range_against_history` localmente pra cada cenário (custom + as 4 sugeridas,
+quando `include_suggested=true`) -- nenhuma chamada extra ao Graph por faixa comparada.
+
+**Achado real corrigido nesta mudança**: o endpoint antigo calculava `annualized_volatility` a
+partir dos preços **horários** mas com o `periods_per_year` padrão da função (365, pensado pra
+fechamentos diários) -- o resultado saía ~√24 ≈ 4,9x menor que o real. Esse campo nunca tinha sido
+exibido no frontend até agora (era só ruído morto na resposta), mas a página nova constrói as
+faixas sugeridas em cima desse número, então precisava estar certo. Fix: `analyze_range` calcula
+`annualized_volatility` a partir dos fechamentos **diários** (já buscados na mesma chamada) --
+mesma convenção já usada em `routers/pools.py` pros indicadores 7d/30d, sem precisar de um
+`periods_per_year` alternativo pra horas.
+
+**As duas funções de sugestão são puras, em `indicators.py`** (mesmo padrão do resto do módulo --
+sem I/O, testadas isoladamente em `test_indicators.py`):
+- `suggest_range_by_volatility(current_price, annualized_vol, horizon_days, k)`: faixa
+  log-simétrica `current_price * exp(∓k·vol·sqrt(horizon_days/365))` -- `k` em
+  `_SUGGESTED_VOLATILITY_K` (`routers/indicators.py`: narrow=0.5, medium=1.0, wide=2.0). Assume
+  log-normalidade dos retornos (mesma convenção de `annualized_volatility`) -- aproximação, não
+  previsão; o rodapé da página avisa isso.
+- `suggest_range_from_realized(daily_closes)`: `(min, max)` da série diária -- sem suposição de
+  distribuição nenhuma, contraponto às três acima.
+
+**Janela histórica tem teto de 41 dias** (`_MAX_HISTORY_DAYS` em `routers/indicators.py`, espelhado
+no frontend como `MAX_HISTORY_DAYS`) -- não é um número arbitrário: `poolHourDatas` é buscado com
+`first: history_days * 24`, e o Graph limita `first` a 1000. 41×24 = 984 (abaixo do teto); 42×24 =
+1008 já estoura. Passar disso faria a query horária vir truncada sem erro nenhum (o Graph
+simplesmente devolve os últimos `first` registros), inflando silenciosamente a fração "tempo em
+faixa" ao ignorar parte do período pedido -- por isso o backend clampa (`min(req.history_days,
+_MAX_HISTORY_DAYS)`) em vez de confiar no `max` do input do frontend. `RangeAnalysisResponse` devolve
+`history_days`/`entry_price` com os valores REALMENTE usados (já clampado/resolvido) -- o frontend
+usa esses campos pra tudo que depende deles (rodapé, escala do "líquido USD" por cenário), nunca o
+que foi enviado no request, senão diverge silenciosamente quando o clamp entra em ação ou quando o
+usuário edita o formulário sem reenviar.
+
+**Pegadinha de UX que já mordeu nesta feature**: o campo "preço de entrada" começa **vazio**, não
+pré-preenchido com o preço atual. Se preenchido com o preço atual (ou deixado igual por engano), IL
+fica **zerado pra todo cenário** (`impermanent_loss_v3` dá 0 quando entrada == saída, e nesse
+horizonte curto o preço atual quase sempre está perto do fechamento mais recente) -- as colunas de
+IL/break-even da tabela e metade do gráfico APR×IL ficam mortas, sem nenhum erro visível. Vazio =
+backend usa o preço no INÍCIO da janela histórica como entrada (mesmo default do simulador antigo),
+que é o que produz um IL diferente de zero de verdade.
+
 ## Índice local (SQLite): /assets, /pools e autocomplete
 
 Além da busca ao vivo no Graph (`/api/pools/search`), o app mantém um índice local (SQLite,

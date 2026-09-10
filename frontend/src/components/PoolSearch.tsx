@@ -412,7 +412,7 @@ export function PoolSearch() {
             separadamente quanto da taxa vai para o LP e quanto vai para o protocolo, então o que vemos
             é sempre a taxa total. Para v2, como o subgraph não indexa taxas separadamente, elas são
             estimadas como 0,30% do volume diário. Ao abrir um pool v2, a página mostra uma versão
-            simplificada (sem simulador de faixa e sem gráfico de preço, já que v2 não tem liquidez
+            simplificada (sem análise avançada de faixa e sem gráfico de preço, já que v2 não tem liquidez
             concentrada nem histórico OHLC indexado).
           </p>
 

@@ -149,8 +149,8 @@ export function PoolOverview({ pool, indicators, indicatorsNote, history }: Prop
       </div>
       <p className="footnote">
         {pool.protocol === 'v2'
-          ? 'Uniswap v2 não tem liquidez concentrada: toda posição é full-range por natureza, então não há simulador de faixa nem taxa configurável para este pool. '
-          : 'O APR acima é o retorno de uma posição em faixa completa (full-range). Uma posição concentrada rende mais enquanto o preço estiver dentro da sua faixa — veja o simulador de faixa abaixo. '}
+          ? 'Uniswap v2 não tem liquidez concentrada: toda posição é full-range por natureza, então não há simulação de faixa nem taxa configurável para este pool. '
+          : 'O APR acima é o retorno de uma posição em faixa completa (full-range). Uma posição concentrada rende mais enquanto o preço estiver dentro da sua faixa — veja a análise avançada de faixa abaixo. '}
         Qualquer um pode criar um token com nome/símbolo parecido com o de uma empresa ou moeda
         conhecida — antes de confiar num pool, confira o endereço do contrato acima contra a fonte
         oficial do projeto (não confie só no nome).

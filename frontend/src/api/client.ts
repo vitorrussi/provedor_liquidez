@@ -11,8 +11,8 @@ import type {
   PoolIndexResponse,
   PoolIndicatorsResponse,
   PoolSummary,
-  RangeSimulationRequest,
-  RangeSimulationResponse,
+  RangeAnalysisRequest,
+  RangeAnalysisResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
@@ -102,8 +102,8 @@ export const api = {
       body: JSON.stringify(req),
     }),
 
-  simulateRange: (req: RangeSimulationRequest) =>
-    request<RangeSimulationResponse>('/api/indicators/range-simulate', {
+  analyzeRange: (req: RangeAnalysisRequest) =>
+    request<RangeAnalysisResponse>('/api/indicators/range-analysis', {
       method: 'POST',
       body: JSON.stringify(req),
     }),

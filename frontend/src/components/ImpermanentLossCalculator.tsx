@@ -131,7 +131,7 @@ export function ImpermanentLossCalculator({ pool }: Props) {
       <p className="footnote">
         {isV2
           ? 'Posições em Uniswap v2 são sempre full-range — não há faixa para escolher, o IL acima é o clássico 2·√r/(1+r) - 1.'
-          : 'Faixas mais estreitas concentram capital (mais taxas enquanto o preço está dentro), mas também ampliam o IL quando o preço se move — compare sempre com as taxas estimadas no simulador de faixa.'}
+          : 'Faixas mais estreitas concentram capital (mais taxas enquanto o preço está dentro), mas também ampliam o IL quando o preço se move — compare sempre com as taxas estimadas na análise avançada de faixa.'}
       </p>
     </div>
   );

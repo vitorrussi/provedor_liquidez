@@ -167,6 +167,45 @@ class TestReplayRangeAgainstHistory:
         assert result.in_range_fraction == pytest.approx(0.5)
 
 
+class TestSuggestRangeByVolatility:
+    def test_wider_k_gives_wider_range(self):
+        narrow = ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.8, horizon_days=30, k=0.5)
+        wide = ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.8, horizon_days=30, k=2.0)
+        assert narrow[0] > wide[0]
+        assert narrow[1] < wide[1]
+
+    def test_symmetric_around_current_price_in_log_space(self):
+        lower, upper = ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.5, horizon_days=30, k=1.0)
+        assert lower < 100.0 < upper
+        assert math.log(100.0 / lower) == pytest.approx(math.log(upper / 100.0))
+
+    def test_zero_volatility_collapses_to_current_price(self):
+        lower, upper = ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.0, horizon_days=30, k=1.0)
+        assert lower == pytest.approx(100.0)
+        assert upper == pytest.approx(100.0)
+
+    def test_invalid_inputs_raise(self):
+        with pytest.raises(ValueError):
+            ind.suggest_range_by_volatility(current_price=0.0, annualized_vol=0.5, horizon_days=30, k=1.0)
+        with pytest.raises(ValueError):
+            ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=-0.1, horizon_days=30, k=1.0)
+        with pytest.raises(ValueError):
+            ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.5, horizon_days=0, k=1.0)
+        with pytest.raises(ValueError):
+            ind.suggest_range_by_volatility(current_price=100.0, annualized_vol=0.5, horizon_days=30, k=0)
+
+
+class TestSuggestRangeFromRealized:
+    def test_min_max_of_series(self):
+        lower, upper = ind.suggest_range_from_realized([100.0, 120.0, 90.0, 110.0])
+        assert lower == 90.0
+        assert upper == 120.0
+
+    def test_empty_series_raises(self):
+        with pytest.raises(ValueError):
+            ind.suggest_range_from_realized([])
+
+
 class TestBreakevenDays:
     def test_negative_il_positive_apr(self):
         days = ind.breakeven_days(position_apr=0.365, impermanent_loss=-0.01)

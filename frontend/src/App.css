@@ -10,6 +10,16 @@
   --positive: #1a9c6c;
   --warning: #b8860b;
   --warning-bg: rgba(184, 134, 11, 0.12);
+  /* Paleta da análise de faixa (RangeAnalysisPage) -- uma cor fixa por
+     cenário sugerido, reaproveitada entre a tabela comparativa e o gráfico
+     de bandas pra facilitar achar a mesma faixa nos dois lugares. Cores
+     próprias (não --negative/--positive/--warning) pra não emprestar o
+     significado "bom/ruim" já usado nesses tokens em outras telas -- aqui é
+     só identidade visual de categoria (estreita/média/larga/realizada). */
+  --scenario-narrow: #d1477a;
+  --scenario-medium: #c07a1e;
+  --scenario-wide: #2f9e6e;
+  --scenario-realized: #7c5cd6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +35,10 @@
     --positive: #3ecf8e;
     --warning: #e0a838;
     --warning-bg: rgba(224, 168, 56, 0.14);
+    --scenario-narrow: #e87ba6;
+    --scenario-medium: #e0a838;
+    --scenario-wide: #3ecf8e;
+    --scenario-realized: #a58aeb;
   }
 }
 
@@ -916,4 +930,99 @@ body {
 
 .token-multiselect__suggestions {
   width: max(220px, 100%);
+}
+
+/* Teaser da análise de faixa avançada, no lugar do card antigo em /pool/:id */
+
+.range-teaser {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.range-teaser:hover {
+  border-color: var(--accent);
+}
+
+.range-teaser__cta {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Tabela comparativa de cenários (RangeAnalysisPage) */
+
+.scenario-table-wrap {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+
+.scenario-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.scenario-table th,
+.scenario-table td {
+  padding: 8px 10px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.scenario-table th:first-child,
+.scenario-table td:first-child {
+  text-align: left;
+}
+
+.scenario-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.scenario-table th:hover {
+  color: var(--text);
+}
+
+.scenario-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.scenario-table__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.scenario-table__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.range-analysis-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.range-analysis-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

@@ -5,7 +5,6 @@ import type { DayDataPoint, PoolDetail, PoolSummary } from '../api/types';
 import { ImpermanentLossCalculator } from '../components/ImpermanentLossCalculator';
 import { PoolOverview } from '../components/PoolOverview';
 import { PriceChart } from '../components/PriceChart';
-import { RangeSimulator } from '../components/RangeSimulator';
 import { RelatedPools } from '../components/RelatedPools';
 import { VolumeChart } from '../components/VolumeChart';
 
@@ -139,7 +138,18 @@ export function PoolPage() {
           )}
           <div className={`dashboard__row ${pool.protocol === 'v2' ? 'dashboard__row--single' : ''}`}>
             <ImpermanentLossCalculator pool={pool} />
-            {pool.protocol !== 'v2' && <RangeSimulator pool={pool} />}
+            {pool.protocol !== 'v2' && (
+              <Link to={`/pool/${encodeURIComponent(pool.id)}/simulate`} className="card range-teaser">
+                <div className="card__header">
+                  <h3>Simulação avançada de faixa</h3>
+                </div>
+                <p className="muted">
+                  Compare sua faixa com faixas sugeridas (estreita/média/larga por volatilidade + variação de preço
+                  realizada), veja gráficos de preço com as faixas sobrepostas e o trade-off APR × IL entre elas.
+                </p>
+                <span className="range-teaser__cta">Abrir análise completa →</span>
+              </Link>
+            )}
           </div>
           <RelatedPools pools={relatedPools} />
         </div>

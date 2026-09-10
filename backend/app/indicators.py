@@ -256,6 +256,42 @@ def replay_range_against_history(
     )
 
 
+def suggest_range_by_volatility(
+    current_price: float, annualized_vol: float, horizon_days: float, k: float
+) -> tuple[float, float]:
+    """Faixa [price_lower, price_upper] centrada em `current_price`, log-simétrica,
+    com largura de `k` desvios-padrão do movimento de preço esperado no horizonte
+    `horizon_days` — mesma convenção log-retorno usada em `annualized_volatility`
+    (desanualiza multiplicando por sqrt(horizon_days/365), depois escala por k).
+
+    k maior -> faixa mais larga (ex.: k=0.5 estreita, k=1 média, k=2 larga). Não é
+    uma garantia estatística (assume log-normalidade dos retornos, que só é uma
+    aproximação da distribuição real) — é um ponto de partida, não uma previsão.
+    """
+    if current_price <= 0:
+        raise ValueError("current_price deve ser positivo")
+    if annualized_vol < 0:
+        raise ValueError("annualized_vol não pode ser negativo")
+    if horizon_days <= 0:
+        raise ValueError("horizon_days deve ser positivo")
+    if k <= 0:
+        raise ValueError("k deve ser positivo")
+    move = k * annualized_vol * math.sqrt(horizon_days / 365)
+    factor = math.exp(move)
+    return current_price / factor, current_price * factor
+
+
+def suggest_range_from_realized(prices: list[float]) -> tuple[float, float]:
+    """Faixa [min, max] realmente observada numa série de preços -- sugestão sem
+    suposição de distribuição, contraponto às faixas de `suggest_range_by_volatility`
+    (que assumem log-normalidade). Útil quando o preço teve movimentos que a
+    volatilidade histórica sozinha não capturaria bem (ex.: um salto isolado).
+    """
+    if not prices:
+        raise ValueError("prices não pode ser vazio")
+    return min(prices), max(prices)
+
+
 def breakeven_days(position_apr: float, impermanent_loss: float) -> float | None:
     """Quantos dias de acúmulo de taxas (no APR informado) seriam necessários
     para compensar o IL atual. Retorna None se não há IL a compensar (>= 0)
