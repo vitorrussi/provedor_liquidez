@@ -858,3 +858,62 @@ body {
 .advanced-filters__range-sep {
   color: var(--muted);
 }
+
+/* TokenMultiSelect (filtro de par Token A/Token B, com chips) */
+
+.token-multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.token-multiselect__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.token-multiselect__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.token-multiselect__chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.token-multiselect__chip button:hover {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.token-multiselect__input-wrap {
+  position: relative;
+}
+
+.token-multiselect__input-wrap input {
+  width: 100%;
+}
+
+.token-multiselect__suggestions {
+  width: max(220px, 100%);
+}

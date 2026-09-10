@@ -5,6 +5,7 @@ import type { IndexStatusResponse, PoolIndexRow, Protocol } from '../api/types';
 import { IndexRefreshBar } from '../components/IndexRefreshBar';
 import { RangeFilter } from '../components/RangeFilter';
 import { SortableHeader } from '../components/SortableHeader';
+import { TokenMultiSelect } from '../components/TokenMultiSelect';
 import { formatFeeTier, formatRatio, formatUsd, protocolLabel } from '../format';
 
 type SortKey =
@@ -39,10 +40,12 @@ export function PoolsIndexPage() {
 
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
-  const [tokenAInput, setTokenAInput] = useState('');
-  const [tokenBInput, setTokenBInput] = useState('');
-  const [tokenA, setTokenA] = useState('');
-  const [tokenB, setTokenB] = useState('');
+  // Chips selecionados (ver TokenMultiSelect) -- diferente de `qInput`/
+  // `minVol1dInput`/etc, não precisam de debounce: selecionar um chip já é
+  // uma ação discreta (clique), não texto sendo digitado, então aplica o
+  // filtro na hora.
+  const [tokenA, setTokenA] = useState<string[]>([]);
+  const [tokenB, setTokenB] = useState<string[]>([]);
   const [protocol, setProtocol] = useState('');
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
@@ -77,8 +80,6 @@ export function PoolsIndexPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setQ(qInput.trim());
-      setTokenA(tokenAInput.trim());
-      setTokenB(tokenBInput.trim());
       setMinVol1d(minVol1dInput);
       setMaxVol1d(maxVol1dInput);
       setMinVol30d(minVol30dInput);
@@ -92,8 +93,6 @@ export function PoolsIndexPage() {
     return () => clearTimeout(timer);
   }, [
     qInput,
-    tokenAInput,
-    tokenBInput,
     minVol1dInput,
     maxVol1dInput,
     minVol30dInput,
@@ -111,13 +110,14 @@ export function PoolsIndexPage() {
       .catch(() => {});
   }, []);
 
-  const pairMode = Boolean(tokenA && tokenB);
+  const pairMode = tokenA.length > 0 && tokenB.length > 0;
+  const hasTokenFilter = tokenA.length > 0 || tokenB.length > 0;
 
   function fetchPage(currentOffset: number) {
     return api.listPoolsIndex({
-      q: pairMode ? undefined : q || undefined,
-      tokenA: pairMode ? tokenA : undefined,
-      tokenB: pairMode ? tokenB : undefined,
+      q: hasTokenFilter ? undefined : q || undefined,
+      tokenA: tokenA.length > 0 ? tokenA : undefined,
+      tokenB: tokenB.length > 0 ? tokenB : undefined,
       exact,
       hideInactive,
       protocol: protocol || undefined,
@@ -232,7 +232,7 @@ export function PoolsIndexPage() {
           onChange={(e) => setQInput(e.target.value)}
           placeholder="Filtrar por símbolo do token"
           className="pool-search__input"
-          disabled={pairMode}
+          disabled={hasTokenFilter}
         />
         <select
           value={protocol}
@@ -251,14 +251,24 @@ export function PoolsIndexPage() {
       </div>
 
       <div className="advanced-filters advanced-filters--inline">
-        <label>
-          Token A (par)
-          <input type="text" value={tokenAInput} onChange={(e) => setTokenAInput(e.target.value)} placeholder="ex: ETH" />
-        </label>
-        <label>
-          Token B (par)
-          <input type="text" value={tokenBInput} onChange={(e) => setTokenBInput(e.target.value)} placeholder="ex: TSLA" />
-        </label>
+        <TokenMultiSelect
+          label="Token A (par)"
+          placeholder="buscar ativo..."
+          selected={tokenA}
+          onChange={(v) => {
+            setTokenA(v);
+            setOffset(0);
+          }}
+        />
+        <TokenMultiSelect
+          label="Token B (par)"
+          placeholder="buscar ativo..."
+          selected={tokenB}
+          onChange={(v) => {
+            setTokenB(v);
+            setOffset(0);
+          }}
+        />
         <label className="advanced-filters__checkbox">
           <input
             type="checkbox"
@@ -330,8 +340,14 @@ export function PoolsIndexPage() {
       </div>
       {pairMode && (
         <p className="footnote">
-          Buscando pools com {tokenA} e {tokenB} (em qualquer ordem) — o filtro de texto acima fica desativado
-          enquanto os dois campos de par estiverem preenchidos.
+          Buscando pools com qualquer combinação entre [{tokenA.join(', ')}] e [{tokenB.join(', ')}] (em qualquer
+          ordem) — o filtro de texto acima fica desativado enquanto houver algum token selecionado.
+        </p>
+      )}
+      {hasTokenFilter && !pairMode && (
+        <p className="footnote">
+          Buscando pools com qualquer um de [{[...tokenA, ...tokenB].join(', ')}] (em qualquer posição) — o filtro
+          de texto acima fica desativado enquanto houver algum token selecionado.
         </p>
       )}
       {(minVol1d || maxVol1d || minVol30d || maxVol30d || minVol1dTvl || maxVol1dTvl || minApr || maxApr) && (

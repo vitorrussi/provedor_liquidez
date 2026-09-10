@@ -82,9 +82,13 @@ _SEARCH_TIMEOUT = 10.0
 # Templates (não constantes estáticas) porque "busca exata" vs "busca por
 # trecho" muda o NOME do campo usado no `where` (symbol vs
 # symbol_contains_nocase) -- não dá pra parametrizar isso como variável
-# GraphQL, só como texto da query. `min_tvl`/`min_volume` (piso de TVL e
-# "ocultar sem atividade") continuam como variáveis de verdade -- não geram
-# uma query diferente, só um valor diferente (0 = sem efeito). Verificado por
+# GraphQL, só como texto da query. Usadas só pela busca por TEXTO LIVRE
+# (`search`); a busca por par/lista de chips (ver `_pair_search_query_v3v4`/
+# `_multi_symbol_query_v3v4` abaixo) usa `symbol_in`, sempre exata, já que os
+# valores vêm de seleção no autocomplete, não de texto digitado -- `exact`
+# não se aplica a ela. `min_tvl`/`min_volume` (piso de TVL e "ocultar sem
+# atividade") continuam como variáveis de verdade -- não geram uma query
+# diferente, só um valor diferente (0 = sem efeito). Verificado por
 # introspecção/consulta real em 2026-09-09: `symbol`/`name` (exato) existem
 # em Token_filter tanto em v2 quanto v3, e combinam com filtros de TVL/volume
 # no mesmo `where` sem problema (semântica AND).
@@ -151,50 +155,103 @@ def _search_query_v2(exact: bool) -> str:
     """
 
 
-# Busca por par (as duas siglas, em qualquer ordem) -- ex: "pools de ETH com
-# TSLA". Precisa das DUAS combinações de ordem (ab/ba) porque token0/token1 é
+# Busca por par com MÚLTIPLOS tokens de cada lado (chips selecionados no
+# autocomplete, ver TokenMultiSelect.tsx no frontend) -- ex: token A =
+# [WETH, WBTC], token B = [USDC, USDT] acha pools de qualquer combinação
+# entre os dois grupos. Usa `symbol_in` (existe em `Token_filter` tanto em v2
+# quanto v3 -- confirmado por introspecção/consulta real em 2026-09-10) em
+# vez de aliases por combinação: uma lista de N símbolos custa a mesma query
+# que uma lista de 1, então isso não multiplica o número de aliases com o
+# número de chips selecionados. Sem variante `_in_nocase` -- os símbolos
+# vêm do índice local (autocomplete), com a capitalização exata como
+# indexada, então não precisa de case-insensitive aqui (diferente da busca
+# por texto livre em `_search_query_v3v4`, que continua usando
+# `_contains_nocase`/exact).
+#
+# Precisa das DUAS combinações de ordem (ab/ba) porque token0/token1 é
 # canônico por endereço (menor primeiro), não por qual "parece" ser o token
 # principal -- confirmado ao vivo em 2026-09-09: WETH/USDC real tem quase
 # todo o TVL do lado token0=USDC/token1=WETH, não o contrário.
-def _pair_search_query_v3v4(exact: bool) -> str:
-    field = "symbol" if exact else "symbol_contains_nocase"
-    return f"""
-    query PairSearchPools($a: String!, $b: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+def _pair_search_query_v3v4() -> str:
+    return """
+    query PairSearchPools($aList: [String!]!, $bList: [String!]!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {
       ab: pools(
-        where: {{ token0_: {{ {field}: $a }}, token1_: {{ {field}: $b }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        where: { token0_: { symbol_in: $aList }, token1_: { symbol_in: $bList }, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
         orderBy: totalValueLockedUSD orderDirection: desc first: $first
-      ) {{ ...PoolFields }}
+      ) { ...PoolFields }
       ba: pools(
-        where: {{ token0_: {{ {field}: $b }}, token1_: {{ {field}: $a }}, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        where: { token0_: { symbol_in: $bList }, token1_: { symbol_in: $aList }, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
         orderBy: totalValueLockedUSD orderDirection: desc first: $first
-      ) {{ ...PoolFields }}
-    }}
-    fragment PoolFields on Pool {{
+      ) { ...PoolFields }
+    }
+    fragment PoolFields on Pool {
       id feeTier totalValueLockedUSD volumeUSD
-      token0 {{ id symbol name decimals }}
-      token1 {{ id symbol name decimals }}
-    }}
+      token0 { id symbol name decimals }
+      token1 { id symbol name decimals }
+    }
     """
 
 
-def _pair_search_query_v2(exact: bool) -> str:
-    field = "symbol" if exact else "symbol_contains_nocase"
-    return f"""
-    query PairSearchPairs($a: String!, $b: String!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {{
+def _pair_search_query_v2() -> str:
+    return """
+    query PairSearchPairs($aList: [String!]!, $bList: [String!]!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {
       ab: pairs(
-        where: {{ token0_: {{ {field}: $a }}, token1_: {{ {field}: $b }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        where: { token0_: { symbol_in: $aList }, token1_: { symbol_in: $bList }, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
         orderBy: reserveUSD orderDirection: desc first: $first
-      ) {{ ...PairFields }}
+      ) { ...PairFields }
       ba: pairs(
-        where: {{ token0_: {{ {field}: $b }}, token1_: {{ {field}: $a }}, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }}
+        where: { token0_: { symbol_in: $bList }, token1_: { symbol_in: $aList }, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
         orderBy: reserveUSD orderDirection: desc first: $first
-      ) {{ ...PairFields }}
-    }}
-    fragment PairFields on Pair {{
+      ) { ...PairFields }
+    }
+    fragment PairFields on Pair {
       id reserveUSD volumeUSD
-      token0 {{ id symbol name decimals }}
-      token1 {{ id symbol name decimals }}
-    }}
+      token0 { id symbol name decimals }
+      token1 { id symbol name decimals }
+    }
+    """
+
+
+# Só um dos dois lados tem chips selecionados (ex: só token A = [WETH, WBTC],
+# token B vazio) -- acha pools com qualquer um desses símbolos em QUALQUER
+# posição (token0 OU token1), não uma combinação entre dois grupos.
+def _multi_symbol_query_v3v4() -> str:
+    return """
+    query MultiSymbolSearchPools($list: [String!]!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {
+      bySymbol0: pools(
+        where: { token0_: { symbol_in: $list }, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) { ...PoolFields }
+      bySymbol1: pools(
+        where: { token1_: { symbol_in: $list }, totalValueLockedUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
+        orderBy: totalValueLockedUSD orderDirection: desc first: $first
+      ) { ...PoolFields }
+    }
+    fragment PoolFields on Pool {
+      id feeTier totalValueLockedUSD volumeUSD
+      token0 { id symbol name decimals }
+      token1 { id symbol name decimals }
+    }
+    """
+
+
+def _multi_symbol_query_v2() -> str:
+    return """
+    query MultiSymbolSearchPairs($list: [String!]!, $first: Int!, $minTvl: BigDecimal!, $minVolume: BigDecimal!) {
+      bySymbol0: pairs(
+        where: { token0_: { symbol_in: $list }, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) { ...PairFields }
+      bySymbol1: pairs(
+        where: { token1_: { symbol_in: $list }, reserveUSD_gte: $minTvl, volumeUSD_gte: $minVolume }
+        orderBy: reserveUSD orderDirection: desc first: $first
+      ) { ...PairFields }
+    }
+    fragment PairFields on Pair {
+      id reserveUSD volumeUSD
+      token0 { id symbol name decimals }
+      token1 { id symbol name decimals }
+    }
     """
 
 _BATCH_DAY_DATA_QUERY = """
@@ -493,8 +550,8 @@ def _aggregate_pool_stats(day_rows: list[tuple[int, float, float]], tvl_usd: flo
 async def _search_v3v4(
     protocol: str,
     search: str | None,
-    token_a: str | None,
-    token_b: str | None,
+    token_a: list[str] | None,
+    token_b: list[str] | None,
     exact: bool,
     min_tvl_usd: float,
     min_volume_usd: float,
@@ -502,11 +559,17 @@ async def _search_v3v4(
 ) -> list[PoolSummary]:
     variables = {"first": limit, "minTvl": str(min_tvl_usd), "minVolume": str(min_volume_usd)}
     if token_a and token_b:
-        query = _pair_search_query_v3v4(exact)
+        query = _pair_search_query_v3v4()
         data = await graph_client.run_query(
-            query, {**variables, "a": token_a, "b": token_b}, protocol=protocol, timeout=_SEARCH_TIMEOUT
+            query, {**variables, "aList": token_a, "bList": token_b}, protocol=protocol, timeout=_SEARCH_TIMEOUT
         )
         raw_pools = data["ab"] + data["ba"]
+    elif token_a or token_b:
+        query = _multi_symbol_query_v3v4()
+        data = await graph_client.run_query(
+            query, {**variables, "list": token_a or token_b}, protocol=protocol, timeout=_SEARCH_TIMEOUT
+        )
+        raw_pools = data["bySymbol0"] + data["bySymbol1"]
     else:
         query = _search_query_v3v4(exact)
         data = await graph_client.run_query(
@@ -525,8 +588,8 @@ async def _search_v3v4(
 
 async def _search_v2(
     search: str | None,
-    token_a: str | None,
-    token_b: str | None,
+    token_a: list[str] | None,
+    token_b: list[str] | None,
     exact: bool,
     min_tvl_usd: float,
     min_volume_usd: float,
@@ -534,11 +597,17 @@ async def _search_v2(
 ) -> list[PoolSummary]:
     variables = {"first": limit, "minTvl": str(min_tvl_usd), "minVolume": str(min_volume_usd)}
     if token_a and token_b:
-        query = _pair_search_query_v2(exact)
+        query = _pair_search_query_v2()
         data = await graph_client.run_query(
-            query, {**variables, "a": token_a, "b": token_b}, protocol="v2", timeout=_SEARCH_TIMEOUT
+            query, {**variables, "aList": token_a, "bList": token_b}, protocol="v2", timeout=_SEARCH_TIMEOUT
         )
         raw_pairs = data["ab"] + data["ba"]
+    elif token_a or token_b:
+        query = _multi_symbol_query_v2()
+        data = await graph_client.run_query(
+            query, {**variables, "list": token_a or token_b}, protocol="v2", timeout=_SEARCH_TIMEOUT
+        )
+        raw_pairs = data["bySymbol0"] + data["bySymbol1"]
     else:
         query = _search_query_v2(exact)
         data = await graph_client.run_query(
@@ -557,8 +626,8 @@ async def _search_v2(
 
 async def search_pools(
     search: str | None = None,
-    token_a: str | None = None,
-    token_b: str | None = None,
+    token_a: list[str] | None = None,
+    token_b: list[str] | None = None,
     exact: bool = False,
     hide_inactive: bool = False,
     min_tvl_usd: float = 0.0,
@@ -568,10 +637,17 @@ async def search_pools(
     """Busca nos subgraphs selecionados (por padrão os 4: v3, v4, v2,
     Aerodrome Slipstream) em paralelo e mescla por TVL.
 
-    Dois modos, mutuamente exclusivos: busca por texto (`search`, contém ou
-    exato conforme `exact`, casa símbolo OU nome) e busca por par (`token_a`
-    + `token_b`, as duas siglas em qualquer ordem -- ex: "pools de ETH com
-    TSLA"). O modo par vence se os dois estiverem preenchidos.
+    Três modos, mutuamente exclusivos, em ordem de prioridade: busca por par
+    (`token_a` + `token_b`, cada um uma lista de siglas escolhidas no
+    autocomplete -- ex: token_a=[WETH,WBTC], token_b=[USDC,USDT] acha pools
+    de qualquer combinação entre os dois grupos, em qualquer ordem de
+    token0/token1); busca por lista única (só `token_a` OU só `token_b`
+    preenchido -- acha pools com qualquer um desses símbolos em qualquer
+    posição); e busca por texto livre (`search`, contém ou exato conforme
+    `exact`, casa símbolo OU nome). Ao contrário da busca por texto, as
+    buscas por lista usam `symbol_in` (correspondência exata, sem
+    contains/nocase) -- os valores vêm de seleção no autocomplete, não de
+    texto livre digitado, então não faz sentido reaproveitar `exact`.
 
     `hide_inactive` filtra na própria consulta ao Graph (via `volumeUSD_gte`
     um pouco acima de zero) pools sem nenhum volume histórico -- não é um

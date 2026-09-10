@@ -225,33 +225,43 @@ busca principal (sem coluna de "#").
 ## Filtros avançados de busca (sigla exata, par de tokens, ocultar sem atividade)
 
 As três telas de busca/listagem (`PoolSearch.tsx`, `/assets`, `/pools`) têm um painel de "Filtros
-avançados" com: busca por **sigla/nome exato** em vez de "contém"; busca por **par de tokens** (dois
-campos, ex: ETH + TSLA, acha pools com os dois em qualquer ordem -- ver por quê "qualquer ordem"
-importa na próxima seção); **ocultar pools sem atividade** (volume histórico zero); piso de TVL
-mínimo; filtro de protocolo; e nº de itens por página (25/50/100).
+avançados" com: busca por **sigla/nome exato** em vez de "contém"; busca por **par de tokens**
+(Token A/Token B, cada um um `TokenMultiSelect` -- digita, aparece autocomplete, clica, vira chip
+com "x" pra remover; dá pra selecionar vários de cada lado, ver seção própria abaixo); **ocultar
+pools sem atividade** (volume histórico zero); piso de TVL mínimo; filtros de faixa (min/max) de
+volume 1d/30d, Vol. 1d/TVL e APR (ver seção "Índice local" acima -- `/pools`/`/assets` filtram o
+SQLite inteiro, a busca principal filtra só depois de buscar, ver ressalva abaixo); filtro de
+protocolo; e nº de itens por página (25/50/100).
 
-O ponto que não é óbvio: **esses filtros são aplicados na própria consulta** (GraphQL `where` pra
-`PoolSearch`, SQL `WHERE` pra `/assets`/`/pools`), não depois de buscar -- "ocultar sem atividade",
-em particular, substituiu um toggle antigo que filtrava client-side depois do fetch (isso desperdiçava
-posições do `limit` com pools mortas; agora o próprio `limit` já é só de resultados relevantes).
+O ponto que não é óbvio: a maioria desses filtros é aplicada na própria consulta (GraphQL `where`
+pra `PoolSearch`, SQL `WHERE` pra `/assets`/`/pools`), não depois de buscar -- "ocultar sem
+atividade", em particular, substituiu um toggle antigo que filtrava client-side depois do fetch
+(isso desperdiçava posições do `limit` com pools mortas; agora o próprio `limit` já é só de
+resultados relevantes). **Exceção**: os filtros de volume 1d/30d/Vol.1d/TVL/APR na busca principal
+(`PoolSearch.tsx`) são pós-filtro, porque dependem de `poolDayData` (enriquecimento que só roda
+depois de já ter os candidatos truncados por `limit`) -- ver seção "Filtros numéricos (volume/APR)
+na busca ao vivo" abaixo.
 
-- **`services/pools.py`**: `_search_query_v3v4(exact)`/`_search_query_v2(exact)` e
-  `_pair_search_query_v3v4(exact)`/`_pair_search_query_v2(exact)` são *funções*, não constantes --
-  "exato" muda o nome do campo GraphQL (`symbol` vs `symbol_contains_nocase`), o que só dá pra
-  parametrizar como texto da query, não como variável. Já `min_tvl`/`min_volume` (piso de TVL/"sem
-  atividade") são variáveis GraphQL de verdade (0 = sem efeito), então não multiplicam o número de
-  templates. Verificado por consulta real em 2026-09-09: `symbol`/`name` exatos existem em
-  `Token_filter` tanto em v2 quanto v3, e combinam com filtros de TVL/volume no mesmo `where`
-  (semântica AND).
+- **`services/pools.py`**: `_search_query_v3v4(exact)`/`_search_query_v2(exact)` são *funções*, não
+  constantes -- "exato" muda o nome do campo GraphQL (`symbol` vs `symbol_contains_nocase`), o que só
+  dá pra parametrizar como texto da query, não como variável. Isso vale só pra busca por TEXTO LIVRE
+  (`q`); a busca por par/lista de chips usa `symbol_in` (sempre exata -- os valores vêm de seleção no
+  autocomplete, não de texto digitado, então `exact` não se aplica a ela, ver próxima seção). Já
+  `min_tvl`/`min_volume` (piso de TVL/"sem atividade") são variáveis GraphQL de verdade (0 = sem
+  efeito), então não multiplicam o número de templates. Verificado por consulta real em 2026-09-09:
+  `symbol`/`name` exatos existem em `Token_filter` tanto em v2 quanto v3, e combinam com filtros de
+  TVL/volume no mesmo `where` (semântica AND).
 - **Busca por par sempre consulta as duas ordens** (`ab`/`ba`, dois aliases) -- token0/token1 é
   canônico por endereço (menor primeiro), não por qual token "parece" ser o principal. Confirmado ao
   vivo: WETH/USDC de verdade tem quase todo o TVL do lado `token0=USDC`/`token1=WETH`, não o
   contrário -- sem consultar as duas ordens, a busca por par perderia a maioria dos resultados reais.
 - **`local_db.py`** replica a mesma lógica em SQL (`query_pools`/`query_assets` recebem `exact`,
-  `hide_inactive`, e `query_pools` também `token_a`/`token_b`) -- exato usa `= ? COLLATE NOCASE` (não
-  `=` puro, que é case-sensitive no SQLite) pra continuar case-insensitive como o "contém". Pra
-  "ocultar sem atividade" funcionar em `/assets` (não só em `/pools`), a tabela `assets` ganhou uma
-  coluna `total_volume_usd` (soma do volume das pools onde o ativo aparece, calculada em
+  `hide_inactive`, e `query_pools` também `token_a`/`token_b` como listas) -- exato usa
+  `= ? COLLATE NOCASE` (não `=` puro, que é case-sensitive no SQLite) pra continuar case-insensitive
+  como o "contém"; já os `IN (...)` do filtro por chips (token_a/token_b) NÃO usam COLLATE NOCASE de
+  propósito, mesma razão do `symbol_in` do GraphQL abaixo (símbolos vêm do índice, capitalização
+  exata). Pra "ocultar sem atividade" funcionar em `/assets` (não só em `/pools`), a tabela `assets`
+  ganhou uma coluna `total_volume_usd` (soma do volume das pools onde o ativo aparece, calculada em
   `index_builder.py` junto com `total_tvl_usd`) -- um arquivo `local_index.db` de antes dessa coluna
   existir é migrado on-the-fly via `_ensure_column` (`ALTER TABLE ... ADD COLUMN`) em vez de precisar
   apagar o cache manualmente.
@@ -259,6 +269,37 @@ posições do `limit` com pools mortas; agora o próprio `limit` já é só de r
   ordenação/toggle antigo -- resetam ao voltar da página de detalhe de um pool). Como a busca por par
   não depende do campo `q` mudar, existe um `searchTrigger` (contador incrementado a cada submit) só
   pra forçar o efeito de busca a rodar de novo mesmo quando `q` continua vazio/igual.
+
+### Token A/Token B: multi-select com chips (`TokenMultiSelect.tsx`) e `symbol_in`
+
+Token A e Token B nos filtros avançados (`PoolSearch.tsx` e `/pools`) são campos de múltipla seleção
+com autocomplete, não texto livre: digita, aparece uma lista de sugestões (mesmo
+`GET /api/index/assets/suggest` usado pelo campo de busca principal), clica numa sugestão pra
+"selecionar" (vira um chip ao lado, com "x" pra remover) -- digitar sem clicar NÃO adiciona nada ao
+filtro, só filtra a lista de sugestões. Cap de 8 chips por campo (`MAX_TOKENS` em
+`TokenMultiSelect.tsx`), só pra UX (não é limite técnico -- ver próximo parágrafo).
+
+Cada lado (Token A, Token B) é uma **lista** de símbolos, não mais uma sigla só -- ex: Token A =
+[WETH, WBTC], Token B = [USDC, USDT] acha pools de qualquer combinação entre os dois grupos, em
+qualquer ordem de token0/token1 (`ab: token0 IN A, token1 IN B` + `ba: token0 IN B, token1 IN A`).
+Isso é feito com o filtro `symbol_in: [String!]` do `Token_filter` do subgraph (confirmado por
+introspecção/consulta real em 2026-09-10, existe em v2 e v3) em vez de gerar um alias por combinação
+de tokens -- uma lista de N símbolos custa a mesma query que uma lista de 1, então o número de chips
+selecionados **não** multiplica o número de aliases/chamadas ao gateway (diferente de antes, quando
+"par" só aceitava uma sigla de cada lado). Efeito colateral bom: sem essa mudança, uma busca por par
+de duas siglas sozinha já levava ~20-25s (4 protocolos, 2 ordens cada); com `symbol_in` a mesma busca
+caiu pra ~5-6s, mesmo com múltiplos símbolos por lado.
+
+Se só um dos dois lados tem chips selecionados (ex: só Token A), vira busca por **lista única**:
+qualquer um daqueles símbolos em qualquer posição (`token0_in` OU `token1_in`) -- um modo a mais além
+de "por par" e "por texto livre" (`search_pools` em `services/pools.py` despacha entre os três, texto
+livre só quando nenhum token_a/token_b vem preenchido). `routers/pools.py`'s `token_a`/`token_b` são
+parâmetros de query repetíveis (`?token_a=WETH&token_a=WBTC`), não mais uma string só.
+
+`symbol_in` **não tem variante `_in_nocase`** -- os símbolos vêm do índice local (escolhidos no
+autocomplete, com a capitalização exata como indexada), não de texto livre digitado, então isso não é
+um problema na prática (diferente da busca por texto livre, que continua usando
+`_contains_nocase`/exato case-insensitive).
 
 ## Preferência do usuário: não derrubar o servidor de dev à toa
 

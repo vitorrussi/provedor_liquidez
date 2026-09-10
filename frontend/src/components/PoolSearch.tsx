@@ -4,6 +4,7 @@ import { api, ApiError } from '../api/client';
 import type { AssetIndexRow, Protocol, PoolSummary } from '../api/types';
 import { formatFeeTier, formatPercent, formatRatio, formatUsd, protocolLabel } from '../format';
 import { SortableHeader } from './SortableHeader';
+import { TokenMultiSelect } from './TokenMultiSelect';
 
 type SortKey = 'pair' | 'tvl' | 'vol1d' | 'vol30d' | 'vol1dTvl' | 'apr' | 'volume';
 type SortDirection = 'asc' | 'desc';
@@ -43,8 +44,8 @@ export function PoolSearch() {
   // submetido (searchTrigger incrementa e força a busca a rodar de novo
   // mesmo se o texto de `q` não mudou, ex: busca só por par de tokens).
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [tokenA, setTokenA] = useState('');
-  const [tokenB, setTokenB] = useState('');
+  const [tokenA, setTokenA] = useState<string[]>([]);
+  const [tokenB, setTokenB] = useState<string[]>([]);
   const [exact, setExact] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
   const [minTvl, setMinTvl] = useState('');
@@ -85,8 +86,8 @@ export function PoolSearch() {
 
   useEffect(() => {
     setQuery(urlQuery);
-    const pairMode = tokenA.trim() && tokenB.trim();
-    if (!urlQuery.trim() && !pairMode) {
+    const hasTokenFilter = tokenA.length > 0 || tokenB.length > 0;
+    if (!urlQuery.trim() && !hasTokenFilter) {
       setResults([]);
       setSearched(false);
       // Também limpa `loading` -- sem isso, cancelar uma busca em andamento
@@ -102,9 +103,9 @@ export function PoolSearch() {
     setError(null);
     api
       .searchPools({
-        q: pairMode ? undefined : urlQuery.trim(),
-        tokenA: pairMode ? tokenA.trim() : undefined,
-        tokenB: pairMode ? tokenB.trim() : undefined,
+        q: hasTokenFilter ? undefined : urlQuery.trim(),
+        tokenA: tokenA.length > 0 ? tokenA : undefined,
+        tokenB: tokenB.length > 0 ? tokenB : undefined,
         exact,
         hideInactive,
         minTvlUsd: minTvl ? Number(minTvl) : undefined,
@@ -143,13 +144,13 @@ export function PoolSearch() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    const pairMode = tokenA.trim() && tokenB.trim();
-    if (!query.trim() && !pairMode) return;
+    const hasTokenFilter = tokenA.length > 0 || tokenB.length > 0;
+    if (!query.trim() && !hasTokenFilter) return;
     setShowSuggestions(false);
     if (query.trim() === urlQuery) {
       // Se o texto de `q` não mudou (ex: só mexeu nos filtros avançados, ou
-      // busca por par sem preencher `q`), a URL não muda -- precisa desse
-      // empurrão extra pro efeito de busca rodar de novo.
+      // busca só por chips de token sem preencher `q`), a URL não muda --
+      // precisa desse empurrão extra pro efeito de busca rodar de novo.
       setSearchTrigger((n) => n + 1);
     } else {
       setSearchParams(query.trim() ? { q: query.trim() } : {});
@@ -159,8 +160,8 @@ export function PoolSearch() {
   function handleSuggestionSelect(asset: AssetIndexRow) {
     setQuery(asset.symbol);
     setShowSuggestions(false);
-    setTokenA('');
-    setTokenB('');
+    setTokenA([]);
+    setTokenB([]);
     setSearchParams({ q: asset.symbol });
   }
 
@@ -250,28 +251,14 @@ export function PoolSearch() {
       {showAdvanced && (
         <form onSubmit={handleSearch} className="advanced-filters">
           <div className="advanced-filters__row">
-            <label>
-              Token A (par)
-              <input
-                type="text"
-                value={tokenA}
-                onChange={(e) => setTokenA(e.target.value)}
-                placeholder="ex: ETH"
-              />
-            </label>
-            <label>
-              Token B (par)
-              <input
-                type="text"
-                value={tokenB}
-                onChange={(e) => setTokenB(e.target.value)}
-                placeholder="ex: TSLA"
-              />
-            </label>
+            <TokenMultiSelect label="Token A (par)" placeholder="buscar ativo..." selected={tokenA} onChange={setTokenA} />
+            <TokenMultiSelect label="Token B (par)" placeholder="buscar ativo..." selected={tokenB} onChange={setTokenB} />
           </div>
           <p className="footnote advanced-filters__hint">
-            Preenchendo os dois, busca pools que tenham os dois tokens (em qualquer ordem) em vez de usar o campo de
-            busca principal — ex: "ETH" + "TSLA" acha pools de ETH com TSLA.
+            Digite pra ver sugestões e clique pra selecionar — dá pra escolher vários de cada lado. Preenchendo os
+            dois, busca pools com qualquer combinação entre os dois grupos (em qualquer ordem) em vez de usar o
+            campo de busca principal — ex: A = [ETH, BTC] + B = [USDC, USDT] acha pools de ETH ou BTC com USDC ou
+            USDT. Preenchendo só um lado, busca pools com qualquer um dos tokens selecionados.
           </p>
 
           <div className="advanced-filters__row">

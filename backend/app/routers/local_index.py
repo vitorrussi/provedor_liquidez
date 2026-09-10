@@ -123,8 +123,8 @@ _VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome"}
 @router.get("/pools", response_model=PoolIndexResponse)
 async def list_pools_index(
     q: str | None = None,
-    token_a: str | None = None,
-    token_b: str | None = None,
+    token_a: list[str] | None = Query(None),
+    token_b: list[str] | None = Query(None),
     exact: bool = False,
     hide_inactive: bool = False,
     protocol: str | None = None,

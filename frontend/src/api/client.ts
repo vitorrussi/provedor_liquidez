@@ -40,8 +40,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface PoolSearchParams {
   q?: string;
-  tokenA?: string;
-  tokenB?: string;
+  // Chips selecionados no autocomplete (ver TokenMultiSelect.tsx) -- listas,
+  // não texto livre; o backend casa por `symbol_in` (exato), não
+  // contains/exact. Ver services/pools.py::search_pools.
+  tokenA?: string[];
+  tokenB?: string[];
   exact?: boolean;
   hideInactive?: boolean;
   minTvlUsd?: number;
@@ -135,8 +138,8 @@ export const api = {
 
   listPoolsIndex: (params: {
     q?: string;
-    tokenA?: string;
-    tokenB?: string;
+    tokenA?: string[];
+    tokenB?: string[];
     exact?: boolean;
     hideInactive?: boolean;
     protocol?: string;

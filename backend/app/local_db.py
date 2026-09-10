@@ -368,8 +368,8 @@ def suggest_assets(prefix: str, limit: int) -> list[AssetRecord]:
 
 def query_pools(
     q: str | None,
-    token_a: str | None,
-    token_b: str | None,
+    token_a: list[str] | None,
+    token_b: list[str] | None,
     exact: bool,
     hide_inactive: bool,
     protocol: str | None,
@@ -391,23 +391,26 @@ def query_pools(
     where: list[str] = []
     params: list[Any] = []
 
-    # Busca por par (as duas siglas em qualquer ordem, ex: "ETH" + "TSLA")
-    # tem prioridade sobre a busca de texto livre -- mesmo comportamento da
-    # busca ao vivo em services/pools.py::search_pools.
+    # Busca por par (chips selecionados no autocomplete de Token A/Token B,
+    # ver TokenMultiSelect.tsx -- cada um uma lista de siglas, IN em vez de
+    # LIKE) tem prioridade sobre a busca de texto livre -- mesmo
+    # comportamento da busca ao vivo em services/pools.py::search_pools.
+    # Símbolos vêm do índice local (autocomplete), com a capitalização exata
+    # -- não usa COLLATE NOCASE aqui (diferente da busca de texto livre por
+    # `q` abaixo, que continua case-insensitive por natureza).
     if token_a and token_b:
-        if exact:
-            where.append(
-                "((token0_symbol = ? COLLATE NOCASE AND token1_symbol = ? COLLATE NOCASE) OR "
-                "(token0_symbol = ? COLLATE NOCASE AND token1_symbol = ? COLLATE NOCASE))"
-            )
-            params.extend([token_a, token_b, token_b, token_a])
-        else:
-            where.append(
-                "((token0_symbol LIKE ? AND token1_symbol LIKE ?) OR "
-                "(token0_symbol LIKE ? AND token1_symbol LIKE ?))"
-            )
-            like_a, like_b = f"%{token_a}%", f"%{token_b}%"
-            params.extend([like_a, like_b, like_b, like_a])
+        a_ph = ", ".join("?" for _ in token_a)
+        b_ph = ", ".join("?" for _ in token_b)
+        where.append(
+            f"((token0_symbol IN ({a_ph}) AND token1_symbol IN ({b_ph})) OR "
+            f"(token0_symbol IN ({b_ph}) AND token1_symbol IN ({a_ph})))"
+        )
+        params.extend([*token_a, *token_b, *token_b, *token_a])
+    elif token_a or token_b:
+        symbols = token_a or token_b or []
+        ph = ", ".join("?" for _ in symbols)
+        where.append(f"(token0_symbol IN ({ph}) OR token1_symbol IN ({ph}))")
+        params.extend([*symbols, *symbols])
     elif q:
         if exact:
             where.append("(token0_symbol = ? COLLATE NOCASE OR token1_symbol = ? COLLATE NOCASE)")

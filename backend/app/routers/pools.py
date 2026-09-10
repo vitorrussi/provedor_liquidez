@@ -13,34 +13,35 @@ _VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome"}
 @router.get("/search", response_model=list[PoolSummary])
 async def search_pools(
     q: str | None = Query(None, min_length=1),
-    token_a: str | None = Query(None, min_length=1),
-    token_b: str | None = Query(None, min_length=1),
+    # Repetíveis (?token_a=WETH&token_a=WBTC): chips selecionados no
+    # autocomplete de Token A/Token B (ver TokenMultiSelect.tsx), não texto
+    # livre -- por isso `search_pools` os trata com `symbol_in` (exato), não
+    # contains/exact. Se só um dos dois vier preenchido, é passado direto
+    # como busca por lista única (qualquer um desses símbolos em qualquer
+    # posição) -- não cai mais pra busca de texto livre por `q`.
+    token_a: list[str] | None = Query(None, min_length=1),
+    token_b: list[str] | None = Query(None, min_length=1),
     exact: bool = False,
     hide_inactive: bool = False,
     min_tvl_usd: float = Query(0.0, ge=0),
     protocol: list[str] | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
 ):
-    pair_mode = bool(token_a and token_b)
-    if not q and not pair_mode and not token_a and not token_b:
+    if not q and not token_a and not token_b:
         raise HTTPException(
-            status_code=400, detail="Informe um termo de busca (q) ou as duas siglas do par (token_a e token_b)."
+            status_code=400,
+            detail="Informe um termo de busca (q) ou ao menos uma sigla em token_a/token_b.",
         )
     if protocol is not None:
         invalid = set(protocol) - _VALID_PROTOCOLS
         if invalid:
             raise HTTPException(status_code=400, detail=f"Protocolo(s) inválido(s): {', '.join(sorted(invalid))}")
 
-    # Se só um dos dois campos de par foi preenchido, trata como busca de
-    # texto normal por aquele token em vez de erro -- fallback mais útil que
-    # simplesmente ignorar o valor digitado.
-    search_term = q or (token_a if not pair_mode else None) or (token_b if not pair_mode else None)
-
     try:
         return await pools_service.search_pools(
-            search=search_term,
-            token_a=token_a if pair_mode else None,
-            token_b=token_b if pair_mode else None,
+            search=q,
+            token_a=token_a,
+            token_b=token_b,
             exact=exact,
             hide_inactive=hide_inactive,
             min_tvl_usd=min_tvl_usd,
