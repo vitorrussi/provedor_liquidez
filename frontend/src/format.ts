@@ -72,6 +72,14 @@ export function protocolLabel(protocol: Protocol): string {
   // a chain já aparece separada via formatChainLabel, não precisa repetir
   // aqui (evitaria "Uniswap v3 (Polygon)" ao lado de um badge "Polygon").
   if (protocol === 'polygon' || protocol === 'avalanche') return 'Uniswap v3';
+  // Robinhood Chain tem Uniswap v3 E v4 nativos, sem como distinguir os
+  // dois sem consultar `dex.id` por pool na GeckoTerminal -- e não faz
+  // diferença pra matemática deste app (mesmo tratamento uniforme já dado a
+  // v3/v4/aerodrome/polygon/avalanche). Ver services/pools.py.
+  if (protocol === 'robinhood') return 'Uniswap v3/v4';
+  // Solana NÃO é Uniswap -- é a Raydium (AMM concentrado, "CLMM"), um DEX
+  // diferente. Não chamar de "Uniswap" aqui seria enganoso.
+  if (protocol === 'solana') return 'Raydium (CLMM)';
   return `Uniswap ${protocol}`;
 }
 
@@ -91,6 +99,10 @@ export function formatChainLabel(chain: Chain): string {
       return 'Polygon';
     case 'avalanche':
       return 'Avalanche';
+    case 'robinhood':
+      return 'Robinhood Chain';
+    case 'solana':
+      return 'Solana';
     default:
       return chain;
   }
@@ -112,7 +124,7 @@ export const ASSET_CATEGORIES = ['Stablecoin (USD)', 'ETH / LST', 'BTC', 'Govern
 // Espelha backend/app/services/pools.py::_PROTOCOL_CHAIN.values() -- usado
 // pro filtro "Rede" em /assets e /pools (separado do filtro de protocolo,
 // já que um ativo não pertence a uma versão da Uniswap, só a uma chain).
-export const ALL_CHAINS: Chain[] = ['mainnet', 'base', 'polygon', 'avalanche'];
+export const ALL_CHAINS: Chain[] = ['mainnet', 'base', 'polygon', 'avalanche', 'robinhood', 'solana'];
 
 // Espelha backend/app/services/pools.py::_PROTOCOL_CHAIN (chave->chain).
 const PROTOCOL_CHAIN: Record<Protocol, Chain> = {
@@ -122,6 +134,8 @@ const PROTOCOL_CHAIN: Record<Protocol, Chain> = {
   aerodrome: 'base',
   polygon: 'polygon',
   avalanche: 'avalanche',
+  robinhood: 'robinhood',
+  solana: 'solana',
 };
 
 // Rótulo pra uso em listas ACHATADAS de protocolo (ex: dropdown "Protocolos"
@@ -143,7 +157,9 @@ export function truncateAddress(address: string): string {
 // O mesmo endereço de contrato significa coisas diferentes em cada chain,
 // então o link do explorador tem que seguir a chain do protocolo, não ser
 // sempre etherscan -- v2/v3/v4 (Ethereum mainnet), aerodrome (Base), polygon
-// (Polygon PoS), avalanche (Avalanche C-Chain).
+// (Polygon PoS), avalanche (Avalanche C-Chain), robinhood (Robinhood Chain,
+// explorer Blockscout), solana (Solana, Solscan -- mesmo padrão de URL
+// "/token/<endereço>" dos outros, só a base muda).
 export function explorerTokenUrl(address: string, protocol: Protocol): string {
   const explorerByProtocol: Record<Protocol, string> = {
     v2: 'https://etherscan.io',
@@ -152,6 +168,8 @@ export function explorerTokenUrl(address: string, protocol: Protocol): string {
     aerodrome: 'https://basescan.org',
     polygon: 'https://polygonscan.com',
     avalanche: 'https://snowtrace.io',
+    robinhood: 'https://robinhoodchain.blockscout.com',
+    solana: 'https://solscan.io',
   };
   return `${explorerByProtocol[protocol]}/token/${address}`;
 }

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     base_rpc_url: str = "https://mainnet.base.org"
     polygon_rpc_url: str = "https://polygon-bor-rpc.publicnode.com"
     avalanche_rpc_url: str = "https://avalanche-c-chain-rpc.publicnode.com"
+    # Robinhood Chain (L2 sobre Arbitrum Orbit, chain id 4663) -- RPC pública
+    # oficial, confirmada em 2026-09-10. Não existe um `solana_rpc_url`
+    # aqui de propósito: Solana não é EVM, `onchain_client.py` (eth_call)
+    # não se aplica -- ver CLAUDE.md.
+    robinhood_rpc_url: str = "https://rpc.mainnet.chain.robinhood.com"
 
     # Piso de TVL (pools v3/v4/aerodrome) / reserva (pares v2) usado ao
     # reconstruir o índice local de ativos/pools (ver services/index_builder.py

@@ -20,8 +20,8 @@ function App() {
           <h1>Provedor de Liquidez</h1>
         </Link>
         <p className="muted">
-          Indicadores de risco e retorno para pools da Uniswap v2/v3/v4 (Ethereum), Aerodrome Slipstream (Base) e
-          Uniswap v3 (Polygon, Avalanche)
+          Indicadores de risco e retorno para pools da Uniswap v2/v3/v4 (Ethereum), Aerodrome Slipstream (Base),
+          Uniswap v3 (Polygon, Avalanche), Uniswap v3/v4 (Robinhood Chain) e Raydium (Solana)
         </p>
       </header>
 
@@ -38,8 +38,8 @@ function App() {
       <footer className="app__footer">
         <p className="footnote">
           Ferramenta educacional. Dados via subgraphs da Uniswap v2/v3/v4, Aerodrome Slipstream e Uniswap v3 em
-          Polygon/Avalanche (The Graph). Não é recomendação de investimento — DeFi envolve risco real de perda de
-          capital.
+          Polygon/Avalanche (The Graph), e via GeckoTerminal/Raydium para Robinhood Chain e Solana. Não é
+          recomendação de investimento — DeFi envolve risco real de perda de capital.
         </p>
       </footer>
 

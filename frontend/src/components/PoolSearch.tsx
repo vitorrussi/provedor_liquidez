@@ -33,7 +33,7 @@ const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
   volume: 'desc',
 };
 
-const ALL_PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche'];
+const ALL_PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche', 'robinhood', 'solana'];
 const RESULT_LIMIT_OPTIONS = [25, 50, 100];
 
 export function PoolSearch() {

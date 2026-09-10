@@ -29,7 +29,7 @@ function toFilterNumber(value: string): number | undefined {
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
-const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche'];
+const PROTOCOLS: Protocol[] = ['v2', 'v3', 'v4', 'aerodrome', 'polygon', 'avalanche', 'robinhood', 'solana'];
 
 export function PoolsIndexPage() {
   const navigate = useNavigate();

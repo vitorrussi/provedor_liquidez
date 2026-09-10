@@ -5,8 +5,8 @@ export interface Token {
   decimals: number;
 }
 
-export type Protocol = 'v2' | 'v3' | 'v4' | 'aerodrome' | 'polygon' | 'avalanche';
-export type Chain = 'mainnet' | 'base' | 'polygon' | 'avalanche';
+export type Protocol = 'v2' | 'v3' | 'v4' | 'aerodrome' | 'polygon' | 'avalanche' | 'robinhood' | 'solana';
+export type Chain = 'mainnet' | 'base' | 'polygon' | 'avalanche' | 'robinhood' | 'solana';
 
 export interface PoolSummary {
   id: string;

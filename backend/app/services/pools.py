@@ -3,12 +3,21 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
-from .. import graph_client, indicators, onchain_client
+from .. import geckoterminal_client, graph_client, indicators, onchain_client, raydium_client
 from ..config import get_settings
+from ..geckoterminal_client import GeckoTerminalError
 from ..graph_client import GraphQueryError
 from ..onchain_client import OnchainQueryError
+from ..raydium_client import RaydiumError
 from ..schemas import DayDataPoint, HourDataPoint, PoolDetail, PoolSummary, Token
+
+# Protocolos cujos dados vêm da GeckoTerminal (não do The Graph) -- ver
+# CLAUDE.md, seção "Robinhood Chain e Solana via GeckoTerminal". `network`
+# na API da GeckoTerminal é sempre igual ao nome do protocolo aqui (mesma
+# convenção "chain == protocol" já usada pra polygon/avalanche).
+_GECKOTERMINAL_PROTOCOLS = {"robinhood", "solana"}
 
 # Uniswap v2 é um AMM de produto constante clássico: sem feeTier configurável
 # (sempre 0,30%) e sem `feesUSD` indexado no subgraph -- estimamos as taxas
@@ -73,6 +82,8 @@ _PROTOCOL_CHAIN = {
     "aerodrome": "base",
     "polygon": "polygon",
     "avalanche": "avalanche",
+    "robinhood": "robinhood",
+    "solana": "solana",
 }
 
 # Nome de settings field por chain, sempre "{chain}_rpc_url" -- ver config.py.
@@ -85,6 +96,10 @@ _CHAIN_RPC_SETTING = {
     "base": "base_rpc_url",
     "polygon": "polygon_rpc_url",
     "avalanche": "avalanche_rpc_url",
+    "robinhood": "robinhood_rpc_url",
+    # Sem entrada pra "solana" de propósito -- não é EVM, `eth_call`/
+    # `onchain_client.py` não se aplica. Verificação on-chain de TVL é
+    # pulada inteiramente pra esse protocolo, ver _get_pool_detail_geckoterminal.
 }
 
 
@@ -438,11 +453,17 @@ query PoolHourData($poolId: String!, $first: Int!) {
 def _split_pool_id(pool_id: str) -> tuple[str, str]:
     """IDs expostos ao frontend têm o formato "{protocol}:{endereço}" (ex:
     "v2:0xabc...") -- ver _to_pool_summary/_to_pool_summary_v2. Sem prefixo,
-    assume v3 (compatibilidade com IDs antigos)."""
+    assume v3 (compatibilidade com IDs antigos).
+
+    Endereços EVM (hex, "0x...") são case-insensitive, por isso normalizamos
+    pra minúsculo -- mas endereços da Solana são base58 e CASE-SENSITIVE
+    (letra maiúscula/minúscula importa de verdade, não é só estética); fazer
+    `.lower()` num endereço Solana produz um endereço diferente e inválido.
+    Por isso "solana" é a única exceção que preserva o case original."""
     if ":" in pool_id:
         protocol, raw = pool_id.split(":", 1)
         if protocol in _PROTOCOL_CHAIN:
-            return protocol, raw.lower()
+            return protocol, raw if protocol == "solana" else raw.lower()
     return "v3", pool_id.lower()
 
 
@@ -479,6 +500,271 @@ def _to_pool_summary_v2(raw: dict) -> PoolSummary:
     )
 
 
+def _to_token_geckoterminal(attrs: dict) -> Token:
+    return Token(
+        id=attrs["address"],
+        symbol=attrs["symbol"],
+        name=attrs.get("name") or attrs["symbol"],
+        decimals=int(attrs["decimals"]),
+    )
+
+
+def _gecko_fee_tier(pool_fee_percentage: str | None) -> int:
+    """Converte a taxa da pool (ex: "0.05" = 0,05%) pra unidade de `fee_tier`
+    deste app (1e-6, mesma unidade da Uniswap -- ex: 500 = 0,05%). A
+    GeckoTerminal não informa isso pra pools da Solana (`pool_fee_percentage`
+    sempre `null`, confirmado em várias pools reais em 2026-09-10) -- nesse
+    caso devolve 0 (desconhecido); o detalhe do pool ("solana") busca a taxa
+    de verdade via raydium_client como companion, ver _get_pool_detail_geckoterminal."""
+    if pool_fee_percentage is None:
+        return 0
+    return round(float(pool_fee_percentage) * 10_000)
+
+
+def _to_pool_summary_geckoterminal(
+    pool_raw: dict, token_lookup: dict[str, dict], protocol: str
+) -> PoolSummary | None:
+    """Mapeia uma pool da GeckoTerminal (Robinhood Chain ou Solana, ver
+    geckoterminal_client.py) pro schema deste app.
+
+    A GeckoTerminal define "base"/"quote" pelo papel do token (base = o
+    ativo "interessante", ex: NVDA; quote = o par estável, ex: USDG) -- o
+    INVERSO da convenção token0/token1 deste app (token0 = lado estável,
+    token1 = lado "interessante", ver docstring de indicators.py). Mapear
+    quote->token0 e base->token1 faz `base_token_price_quote_token` já bater
+    direto com a convenção `token0Price` sem inverter nada -- verificado
+    numericamente em 2026-09-10 (pool NVDA/USDG na Robinhood Chain:
+    base_token_price_quote_token = 218,83, preço real da NVDA em dólares).
+    """
+    attrs = pool_raw["attributes"]
+    rel = pool_raw["relationships"]
+    quote_id = rel["quote_token"]["data"]["id"]
+    base_id = rel["base_token"]["data"]["id"]
+    if quote_id not in token_lookup or base_id not in token_lookup:
+        return None
+    token0 = _to_token_geckoterminal(token_lookup[quote_id])
+    token1 = _to_token_geckoterminal(token_lookup[base_id])
+    # `pool_raw["id"]` é "{network}_{endereço}" (ex: "solana_8aDaB...") --
+    # nem "network" nem endereços válidos contêm "_", então split(1) é seguro.
+    raw_address = pool_raw["id"].split("_", 1)[1]
+    return PoolSummary(
+        id=f"{protocol}:{raw_address}",
+        protocol=protocol,
+        chain=_PROTOCOL_CHAIN[protocol],
+        token0=token0,
+        token1=token1,
+        fee_tier=_gecko_fee_tier(attrs.get("pool_fee_percentage")),
+        total_value_locked_usd=float(attrs.get("reserve_in_usd") or 0.0),
+        # Diferente das outras chains (o subgraph da Uniswap tem um campo de
+        # volume ACUMULADO desde a criação da pool), a GeckoTerminal só dá
+        # volume em janelas -- 24h é a aproximação usada aqui, documentado.
+        volume_usd=float(((attrs.get("volume_usd") or {}).get("h24")) or 0.0),
+    )
+
+
+async def _search_geckoterminal(
+    protocol: str, search: str | None, min_tvl_usd: float, min_volume_usd: float, limit: int
+) -> list[PoolSummary]:
+    """Busca ao vivo pra Robinhood Chain/Solana via GeckoTerminal -- só busca
+    por texto livre (sem par de tokens/lista de símbolos, a API não tem esse
+    filtro estruturado; ver CLAUDE.md). `min_tvl_usd`/`min_volume_usd` são
+    aplicados aqui no Python, depois da resposta (a GeckoTerminal não tem
+    esses filtros na própria consulta como o GraphQL do Graph tem)."""
+    if not search:
+        return []
+    try:
+        raw_pools, token_lookup = await asyncio.wait_for(
+            geckoterminal_client.search_pools(protocol, search), timeout=_SEARCH_TIMEOUT
+        )
+    except (GeckoTerminalError, asyncio.TimeoutError):
+        # Sem isso, uma busca concorrente com um refresh de índice (que
+        # enfileira ~20 chamadas no mesmo limitador de _MIN_INTERVAL_SECONDS)
+        # ficaria presa esperando a vez dela por até ~80s -- mesmo timeout
+        # curto já usado pros outros protocolos (v4/Polygon lentos), aqui
+        # cobrindo o cenário de fila do rate limiter em vez de lentidão do
+        # próprio subgraph.
+        return []
+    results: list[PoolSummary] = []
+    for raw in raw_pools:
+        summary = _to_pool_summary_geckoterminal(raw, token_lookup, protocol)
+        if summary is None:
+            continue
+        if summary.total_value_locked_usd < min_tvl_usd or summary.volume_usd < min_volume_usd:
+            continue
+        results.append(summary)
+    return results[:limit]
+
+
+async def _resolve_fee_tier_geckoterminal(protocol: str, raw_id: str, pool_fee_percentage: str | None) -> int:
+    """`pool_fee_percentage` vem `null` da GeckoTerminal pra toda pool de
+    Solana testada (2026-09-10) -- pra esse protocolo, busca `feeRate` como
+    companion na própria Raydium. Robinhood Chain sempre tem
+    `pool_fee_percentage` de verdade, não precisa do companion.
+
+    Uma falha de rede na Raydium (`RaydiumError`) PROPAGA em vez de virar 0 --
+    achado real: 0 aqui vira `fee_tier=0` -> `fee_rate=0` -> `fees_usd=0` em
+    todo candle -> APR de taxa mostrado como 0% pro pool inteiro, um zero
+    fabricado que parece uma medição real (mesma classe de bug já visto e
+    corrigido pro preço/TVL desta integração). Quem chama decide como tratar
+    a falha de verdade (ver `_get_pool_detail_geckoterminal`/
+    `_get_day_data_geckoterminal`). Só "a Raydium respondeu e não tem essa
+    pool" (`info is None`) é tratado como "taxa desconhecida" (0) de
+    verdade, não uma falha transitória."""
+    fee_tier = _gecko_fee_tier(pool_fee_percentage)
+    if fee_tier != 0 or protocol != "solana":
+        return fee_tier
+    info_by_id = await raydium_client.get_pool_info([raw_id])
+    info = info_by_id.get(raw_id)
+    if info is None:
+        return 0
+    return round(float(info["feeRate"]) * 1_000_000)
+
+
+def _parse_gecko_timestamp(iso_string: str | None) -> int | None:
+    if not iso_string:
+        return None
+    return int(datetime.fromisoformat(iso_string.replace("Z", "+00:00")).timestamp())
+
+
+async def _get_pool_detail_geckoterminal(protocol: str, raw_id: str) -> PoolDetail | None:
+    try:
+        result = await geckoterminal_client.get_pool(protocol, raw_id)
+    except GeckoTerminalError as exc:
+        # Propaga como GraphQueryError (502 no router) em vez de devolver
+        # None (404) -- achado real: um None aqui já foi confundido com
+        # "pool não encontrado" quando na verdade era rate limit da
+        # GeckoTerminal. "Não encontrado" de verdade continua vindo do
+        # `result is None` abaixo (a API respondeu, só que sem esse pool).
+        raise GraphQueryError(str(exc)) from exc
+    if result is None:
+        return None
+    pool_raw, token_lookup = result
+    summary = _to_pool_summary_geckoterminal(pool_raw, token_lookup, protocol)
+    if summary is None:
+        return None
+
+    attrs = pool_raw["attributes"]
+    try:
+        fee_tier = await _resolve_fee_tier_geckoterminal(protocol, raw_id, attrs.get("pool_fee_percentage"))
+    except RaydiumError as exc:
+        raise GraphQueryError(str(exc)) from exc
+    current_price = float(attrs["base_token_price_quote_token"])
+
+    pool = PoolDetail(
+        id=f"{protocol}:{raw_id}",
+        protocol=protocol,
+        chain=_PROTOCOL_CHAIN[protocol],
+        token0=summary.token0,
+        token1=summary.token1,
+        fee_tier=fee_tier,
+        total_value_locked_usd=summary.total_value_locked_usd,
+        volume_usd=summary.volume_usd,
+        tick=None,
+        token0_price=current_price,
+        token1_price=(1 / current_price) if current_price else 0.0,
+        # GeckoTerminal não dá volume/nº de transações acumulados desde a
+        # criação da pool (só janelas m5/h1/h6/h24) -- diferente do subgraph
+        # da Uniswap, que tem esses campos "lifetime" prontos. Fica 0 em vez
+        # de inventar um número; o volume de janela (7d/30d) abaixo é real.
+        fees_usd_lifetime=0.0,
+        tx_count=0,
+        created_at=_parse_gecko_timestamp(attrs.get("pool_created_at")),
+    )
+
+    # Verificação on-chain de TVL: só Robinhood Chain (EVM de verdade) --
+    # Solana não tem eth_call/balanceOf, tvl_verified_onchain fica sempre
+    # False pra esse protocolo (ver CLAUDE.md).
+    if protocol == "robinhood":
+        try:
+            balance0_raw, balance1_raw = await asyncio.gather(
+                onchain_client.get_erc20_balance(pool.token0.id, raw_id, _rpc_url_for_protocol(protocol)),
+                onchain_client.get_erc20_balance(pool.token1.id, raw_id, _rpc_url_for_protocol(protocol)),
+            )
+            balance0 = balance0_raw / (10**pool.token0.decimals)
+            balance1 = balance1_raw / (10**pool.token1.decimals)
+            price0_usd = float(attrs["quote_token_price_usd"])
+            price1_usd = float(attrs["base_token_price_usd"])
+            pool.total_value_locked_usd = balance0 * price0_usd + balance1 * price1_usd
+            pool.tvl_verified_onchain = True
+        except OnchainQueryError:
+            pass
+
+    # Volume/APR de janela (1d/7d/30d) a partir do OHLCV diário -- reaproveita
+    # _aggregate_pool_stats (mesma função usada pro resto do app). `fees_usd`
+    # por dia é estimado (volume * fee_tier), mesmo padrão já usado pra v2.
+    try:
+        ohlcv_day = await geckoterminal_client.get_ohlcv(protocol, raw_id, "day", limit=30)
+    except GeckoTerminalError:
+        ohlcv_day = []
+    fee_rate = fee_tier / 1_000_000
+    day_rows = [(int(row[0]), float(row[5]), float(row[5]) * fee_rate) for row in ohlcv_day]
+    stats = _aggregate_pool_stats(day_rows, pool.total_value_locked_usd)
+    pool.volume_1d_usd = stats.volume_1d
+    pool.volume_7d_usd = stats.volume_7d
+    pool.volume_30d_usd = stats.volume_30d
+    pool.volume_1d_over_tvl = stats.volume_1d_over_tvl
+    pool.apr_pool_7d = stats.apr_7d
+    pool.apr_pool_30d = stats.apr_30d
+    return pool
+
+
+async def _get_day_data_geckoterminal(protocol: str, raw_id: str, days: int) -> list[DayDataPoint]:
+    try:
+        fee_tier = await _gecko_fee_tier_for_history(protocol, raw_id)
+        fee_rate = fee_tier / 1_000_000
+        ohlcv = await geckoterminal_client.get_ohlcv(protocol, raw_id, "day", limit=days)
+    except (GeckoTerminalError, RaydiumError) as exc:
+        raise GraphQueryError(str(exc)) from exc
+    points = [
+        DayDataPoint(
+            date=int(row[0]),
+            # GeckoTerminal não indexa TVL histórico por candle (só o estado
+            # atual da pool) -- confirmado sem uso nenhum no frontend hoje
+            # (nenhum componente lê DayDataPoint.tvl_usd), então 0.0 aqui não
+            # tem efeito visível; documentado pra não confundir se algum dia
+            # alguém for usar esse campo pra essas duas protocolos.
+            tvl_usd=0.0,
+            volume_usd=float(row[5]),
+            fees_usd=float(row[5]) * fee_rate,
+            open=float(row[1]),
+            high=float(row[2]),
+            low=float(row[3]),
+            close=float(row[4]),
+        )
+        for row in ohlcv
+    ]
+    return list(reversed(points))  # GeckoTerminal devolve mais recente primeiro
+
+
+async def _get_hour_data_geckoterminal(protocol: str, raw_id: str, hours: int) -> list[HourDataPoint]:
+    try:
+        ohlcv = await geckoterminal_client.get_ohlcv(protocol, raw_id, "hour", limit=min(hours, 1000))
+    except GeckoTerminalError as exc:
+        raise GraphQueryError(str(exc)) from exc
+    points = [
+        HourDataPoint(
+            period_start_unix=int(row[0]),
+            close=float(row[4]),
+            tvl_usd=0.0,  # ver comentário em _get_day_data_geckoterminal
+            volume_usd=float(row[5]),
+        )
+        for row in ohlcv
+    ]
+    return list(reversed(points))
+
+
+async def _gecko_fee_tier_for_history(protocol: str, raw_id: str) -> int:
+    """Usado só por get_pool_day_data/get_pool_hour_data (que não têm o
+    detalhe do pool já buscado) pra estimar `fees_usd` a partir do volume --
+    mesma resolução de taxa que _get_pool_detail_geckoterminal usa, só que
+    busca o pool primeiro porque quem chama aqui não tem `pool_raw` em mãos."""
+    result = await geckoterminal_client.get_pool(protocol, raw_id)
+    if result is None:
+        return 0
+    pool_raw, _ = result
+    return await _resolve_fee_tier_geckoterminal(protocol, raw_id, pool_raw["attributes"].get("pool_fee_percentage"))
+
+
 async def _fetch_recent_day_data_batch(
     protocol: str, raw_pool_ids: list[str], days: int = 30
 ) -> dict[str, list[tuple[int, float, float]]]:
@@ -488,8 +774,16 @@ async def _fetch_recent_day_data_batch(
 
     Pagina em até 2 páginas de 1000 linhas (2000 no total). Para v2, como não
     existe `feesUSD` indexado, as taxas são estimadas como volume * V2_FEE_RATE.
-    """
-    if not raw_pool_ids:
+
+    Não se aplica a `robinhood`/`solana` (não vêm do The Graph, ver
+    _GECKOTERMINAL_PROTOCOLS) -- devolve vazio direto em vez de tentar uma
+    query GraphQL que não existe pra esses protocolos. Enriquecimento em
+    lote (volume 1d/7d/30d/APR na busca ao vivo) fica de fora do escopo pra
+    esses dois por ora: a GeckoTerminal não tem um endpoint de "day data em
+    lote pra N pools", só OHLCV por pool -- buscar isso pra cada candidato
+    de uma busca estouraria o rate limit rapidinho. O detalhe de um pool
+    específico (`_get_pool_detail_geckoterminal`) já busca isso individualmente."""
+    if not raw_pool_ids or protocol in _GECKOTERMINAL_PROTOCOLS:
         return {}
 
     since = int(time.time()) - (days + 1) * 86400
@@ -763,7 +1057,7 @@ async def search_pools(
     em lote pra v2 mesmo antes desses filtros existirem, só que aqui o custo
     é por poucos candidatos, não pelos ~30 mil pools v2 de um crawl completo.
     """
-    active_protocols = protocols or ["v3", "v4", "v2", "aerodrome", "polygon", "avalanche"]
+    active_protocols = protocols or ["v3", "v4", "v2", "aerodrome", "polygon", "avalanche", "robinhood", "solana"]
     # "Sem atividade" = volume histórico zero (mesmo critério do badge "sem
     # atividade" no frontend) -- um piso pequeno em vez de "> 0" pra não
     # depender de precisão exata de ponto flutuante no lado do subgraph.
@@ -785,6 +1079,13 @@ async def search_pools(
     for protocol in active_protocols:
         if protocol == "v2":
             coros.append(_search_v2(search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, fetch_limit))
+        elif protocol in _GECKOTERMINAL_PROTOCOLS:
+            if token_a or token_b:
+                # Busca por par/lista de símbolos não é suportada aqui -- a
+                # busca da GeckoTerminal é só texto livre, sem filtro
+                # estruturado tipo `symbol_in`. Ver CLAUDE.md.
+                continue
+            coros.append(_search_geckoterminal(protocol, search, min_tvl_usd, min_volume_usd, fetch_limit))
         else:
             coros.append(
                 _search_v3v4(protocol, search, token_a, token_b, exact, min_tvl_usd, min_volume_usd, fetch_limit)
@@ -976,6 +1277,8 @@ async def get_pool_detail(pool_id: str) -> PoolDetail | None:
     protocol, raw_id = _split_pool_id(pool_id)
     if protocol == "v2":
         return await _get_pool_detail_v2(raw_id)
+    if protocol in _GECKOTERMINAL_PROTOCOLS:
+        return await _get_pool_detail_geckoterminal(protocol, raw_id)
     return await _get_pool_detail_v3v4(protocol, raw_id)
 
 
@@ -985,6 +1288,8 @@ async def get_pool_day_data(pool_id: str, days: int = 30) -> list[DayDataPoint]:
         # PairDayData da v2 não tem série OHLC (só reservas/volume) -- ver
         # docstring de _BATCH_DAY_DATA_QUERY_V2. Sem gráfico de preço para v2.
         raise GraphQueryError("Histórico de preço diário não está disponível para pools Uniswap v2 neste app.")
+    if protocol in _GECKOTERMINAL_PROTOCOLS:
+        return await _get_day_data_geckoterminal(protocol, raw_id, days)
     data = await graph_client.run_query(_POOL_DAY_DATA_QUERY, {"poolId": raw_id, "first": days}, protocol=protocol)
     points = [
         DayDataPoint(
@@ -1008,6 +1313,8 @@ async def get_pool_hour_data(pool_id: str, hours: int = 168) -> list[HourDataPoi
         # Sem liquidez concentrada na v2 -- o simulador de faixa não se aplica
         # (o frontend nem oferece essa opção para pools v2, ver App.tsx).
         raise GraphQueryError("Simulação de faixa não se aplica a pools Uniswap v2.")
+    if protocol in _GECKOTERMINAL_PROTOCOLS:
+        return await _get_hour_data_geckoterminal(protocol, raw_id, hours)
     data = await graph_client.run_query(_POOL_HOUR_DATA_QUERY, {"poolId": raw_id, "first": hours}, protocol=protocol)
     points = [
         HourDataPoint(
@@ -1054,6 +1361,14 @@ async def get_related_pools(pool_id: str) -> list[PoolSummary]:
     """
     pool = await get_pool_detail(pool_id)
     if pool is None:
+        return []
+
+    # Fora de escopo pra Robinhood Chain/Solana por ora: cada uma só tem um
+    # protocolo na própria chain (sem v2/v3/v4 pra cruzar), e "outras fee
+    # tiers do mesmo par" exigiria uma busca por par que a GeckoTerminal não
+    # suporta (ver _search_geckoterminal). Retornar vazio explicitamente em
+    # vez de deixar a query GraphQL abaixo falhar incidentalmente.
+    if pool.protocol in _GECKOTERMINAL_PROTOCOLS:
         return []
 
     token0_addr = pool.token0.id

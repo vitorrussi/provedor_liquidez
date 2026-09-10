@@ -10,7 +10,9 @@ Ferramenta de apoio a decisão para provedores de liquidez: calcula Impermanent 
 volatilidade e simula faixas de liquidez concentrada contra o histórico real de preço de um pool.
 Backend FastAPI (Python) + frontend React/TypeScript (Vite). Dados vêm dos subgraphs oficiais da
 Uniswap v2, v3 e v4 (Ethereum mainnet) e de subgraphs comunitários do Aerodrome Slipstream (Base) e
-da Uniswap v3 em Polygon e Avalanche, todos via gateway do The Graph (um subgraph por protocolo).
+da Uniswap v3 em Polygon e Avalanche, todos via gateway do The Graph (um subgraph por protocolo) --
+mais Uniswap v3/v4 na Robinhood Chain e Raydium na Solana, essas duas via API pública da
+GeckoTerminal (não o The Graph, ver seção "Robinhood Chain e Solana via GeckoTerminal/Raydium").
 
 ## TVL do subgraph pode estar errado -- por que existe verificação on-chain
 
@@ -75,8 +77,9 @@ com `asyncio.gather(..., return_exceptions=True)` e usa um timeout mais curto (`
 só pras buscas: se um protocolo falhar ou estourar o timeout, os outros ainda aparecem em vez de
 derrubar a busca inteira. Isso é intencional, não um bug — se notar resultados de v4, Aerodrome ou
 Polygon faltando ocasionalmente numa busca por termo muito comum, é essa degradação graciosa agindo,
-não um erro silencioso. Com 6 protocolos, uma busca completa (com enriquecimento de volume/APR) pode
-levar ~10-15s.
+não um erro silencioso. Com 8 protocolos (6 via The Graph + robinhood/solana via GeckoTerminal, ver
+seção própria abaixo), uma busca completa (com enriquecimento de volume/APR) pode levar ~10-15s --
+mais alguns segundos se a busca incluir robinhood/solana, por causa do rate limit da GeckoTerminal.
 
 ## Aerodrome Slipstream (Base)
 
@@ -178,13 +181,14 @@ por que isso foi investigado). Se algum dia forem adicionadas, seguir o mesmo pr
 (introspecção + `factories.id` contra o contrato on-chain real) antes de confiar nos dados, exatamente
 como feito aqui.
 
-## Ações tokenizadas (RWA) -- pesquisado, NÃO implementado (2026-09-10)
+## Ações tokenizadas (RWA) -- pesquisa inicial (2026-09-10, ver seção seguinte pra implementação)
 
 Usuário pediu suporte a pools de ações tokenizadas de grandes empresas americanas (Apple, Microsoft,
-Amazon, Google, Tesla, "e mais se der"). Pesquisa extensa feita, decisão foi **não implementar por
-enquanto** -- não é falta de esforço, é que não existe liquidez de verdade acessível pela arquitetura
-deste app hoje. Documentado aqui pra não perder o trabalho e pra saber exatamente o que reavaliar
-depois, em vez de repetir a pesquisa do zero numa sessão futura.
+Amazon, Google, Tesla, "e mais se der"). Primeira pesquisa (abaixo) concluiu que a Ethereum mainnet
+não tinha liquidez real utilizável -- só depois, numa pesquisa de acompanhamento, ficou claro que a
+liquidez de verdade estava na Robinhood Chain e na Solana, e que dava pra chegar nelas por fora do
+The Graph (ver "Robinhood Chain e Solana via GeckoTerminal/Raydium" logo abaixo, que é a implementação
+de verdade). Esta seção fica como registro do porquê a Ethereum mainnet sozinha não bastava.
 
 **Endereços verificados (Backed Finance / "xStocks"), todos Ethereum mainnet, todos com fonte
 independente (CSV oficial `github.com/backed-fi/cow-xstocks-tokenlist`, 3 deles cruzados também no
@@ -234,12 +238,122 @@ nem de filtro de TVL do índice local -- é ausência real de liquidez nesse par
   modelar, independente de qual chain -- categoria de produto incompatível com o resto do app, não só
   uma questão de chain suportada.
 
-**Decisão**: não implementar a categoria "Ação tokenizada" agora -- com a Ethereum mainnet tendo
-efetivamente uma pool de $100 de TVL pra mostrar, a infraestrutura (categoria address-verificada,
-filtro em `/assets`/`/pools`) não teria dado nenhum pra exibir que já justifique o esforço. Reavaliar
-quando: (a) a Robinhood Chain aparecer indexada no Graph Explorer, ou (b) a liquidez de xStocks na
-Ethereum mainnet crescer de forma que valha a pena. Os endereços acima já verificados podem ser
-reaproveitados direto nesse momento, sem repetir a pesquisa.
+**Decisão original (superada)**: não implementar a categoria "Ação tokenizada" enquanto só a Ethereum
+mainnet fosse considerada. Isso mudou depois de uma segunda pesquisa focada especificamente em achar
+a liquidez de verdade em outros lugares -- ver próxima seção.
+
+## Robinhood Chain e Solana via GeckoTerminal/Raydium (implementado em 2026-09-10)
+
+Depois da pesquisa acima concluir que a Ethereum mainnet não tinha liquidez real de ações tokenizadas,
+o usuário pediu pra procurar formas de acessar Robinhood Chain e Solana mesmo sem o The Graph, desde
+que a API tivesse free tier. A **GeckoTerminal** (`api.geckoterminal.com/api/v2`, pública, sem API
+key) cobre as duas com o mesmo formato de resposta -- confirmado ao vivo cobrindo pools reais nas
+duas chains, com histórico OHLCV diário/horário de verdade (não só preço atual). Pra Solana
+especificamente, ela não devolve a taxa da pool (`pool_fee_percentage` sempre `null`, testado em
+várias pools) -- a API da própria **Raydium** (`api-v3.raydium.io`, também sem key) complementa com
+`feeRate` e APR já calculados, usada só como companion pra esse único campo.
+
+Dois clientes novos, no mesmo espírito fino de `graph_client.py`/`onchain_client.py`:
+`backend/app/geckoterminal_client.py` e `backend/app/raydium_client.py`. `services/pools.py` ganhou
+dois protocolos novos (`"robinhood"`, `"solana"`, cada um com `chain` igual ao próprio nome -- mesma
+convenção "protocolo == chain" já usada pra `polygon`/`avalanche`) que despacham pra funções
+`_search_geckoterminal`/`_get_pool_detail_geckoterminal`/`_get_day_data_geckoterminal`/
+`_get_hour_data_geckoterminal` em vez de `graph_client.run_query`.
+
+**Convenção de preço invertida (achado que evitou reescrever a matemática do app)**: a GeckoTerminal
+define "base"/"quote" pelo papel do token (base = o ativo "interessante", ex: NVDA; quote = o par
+estável, ex: USDG) -- o INVERSO da convenção `token0`/`token1` deste app (token0 = lado estável,
+token1 = lado "interessante", ver docstring de `indicators.py`). Mapeando quote→token0 e base→token1,
+o campo `base_token_price_quote_token` já bate direto com a convenção `token0Price` sem inverter nada
+-- verificado numericamente (pool NVDA/USDG na Robinhood Chain: `base_token_price_quote_token` =
+218,83, preço real da NVDA em dólares na época). Essa conversão vive em
+`_to_pool_summary_geckoterminal` (`services/pools.py`) -- reaproveitada tanto pela busca ao vivo
+quanto pelo crawl do índice (`_normalize_geckoterminal_row` em `index_builder.py`).
+
+**Rate limit real da GeckoTerminal é mais rígido do que "30 req/min" sugere -- vários achados reais,
+nessa ordem, ao testar de verdade**:
+1. Um limitador por "contagem numa janela de 60s" (rajada de até 25, depois espera) ainda tomou 429
+   no meio de um crawl de ~10-20 chamadas em sequência -- o limite parece se importar com o
+   ESPAÇAMENTO entre chamadas, não só a contagem total por minuto. Corrigido trocando pra um
+   intervalo mínimo fixo entre chamadas consecutivas (`_MIN_INTERVAL_SECONDS = 4.0` em
+   `geckoterminal_client.py`, ~15 req/min sustentado -- bem mais conservador que os 30/min nominais).
+2. Mesmo com esse espaçamento, uma sequência longa (crawl de até 10 páginas) ainda pode tomar 429
+   perto do fim -- por isso `_crawl_geckoterminal` (`index_builder.py`) aceita um resultado PARCIAL
+   nesse caso (páginas já buscadas ficam no índice) em vez de descartar tudo, mesmo espírito de
+   "atualização parcial não é tudo-ou-nada" já usado pros outros 6 protocolos.
+3. **Uma única visualização de página de pool já fazia várias chamadas REDUNDANTES** (detalhe do
+   pool, `/indicators`, `/history/daily` e `/history/hourly` cada um buscando o fee_tier e/ou o
+   OHLCV de novo, de forma independente) -- isso sozinho bastou pra estourar o limite numa única
+   carga de página. Corrigido com um cache de TTL curto (20s, `_cached`/`_CACHE_TTL_SECONDS` em
+   `geckoterminal_client.py`) em `get_pool`/`get_ohlcv` -- curto o bastante pra não deixar preço/TVL
+   visivelmente desatualizado, longo o bastante pra cobrir as poucas chamadas de uma carga de página.
+4. **Achado mais sério**: antes do cache, um 429 durante a busca do detalhe do pool virava um `None`
+   silencioso em `geckoterminal_client.get_pool`, que o resto do código já tratava como "pool não
+   encontrado" (404) -- ou seja, rate limit e "pool inexistente" ficavam indistinguíveis, e a página
+   inteira quebrava com uma mensagem enganosa. Corrigido: `get_pool`/`get_ohlcv` agora só devolvem
+   `None`/lista vazia quando a API responde de verdade dizendo que não existe; erro de rede/rate
+   limit propaga como `GeckoTerminalError` (convertido pra `GraphQueryError` em
+   `_get_pool_detail_geckoterminal`/`_get_day_data_geckoterminal`/`_get_hour_data_geckoterminal`, que
+   os routers já tratam como 502) -- nunca mais um 404 enganoso.
+5. `_crawl_geckoterminal` também achou um `UNIQUE constraint failed: pools.id` real: diferente do
+   cursor estável (`id_gt`) dos outros protocolos, a paginação por número de página aqui compete
+   contra um ranking que muda em tempo real (volume/TVL) -- a mesma pool pode aparecer em duas
+   páginas diferentes se a ordenação mudar entre uma chamada e outra. Corrigido com dedupe explícito
+   por id (mesmo padrão que `_search_v3v4`/`_search_v2` já usam).
+6. **Busca ao vivo desses dois protocolos não tinha timeout** -- diferente de v2/v3/v4/Aerodrome/
+   Polygon/Avalanche, que já usam `_SEARCH_TIMEOUT` (10s) em toda chamada ao gateway.
+   `_search_geckoterminal` chamava `geckoterminal_client.search_pools` direto: como o limitador de
+   `_MIN_INTERVAL_SECONDS` é compartilhado pelo processo inteiro (um `asyncio.Lock` guardado durante
+   o `sleep`), uma busca de usuário concorrente com um refresh de índice (que enfileira ~20 chamadas
+   nesse mesmo limitador) ficaria presa por até ~80s esperando a vez dela, sem limite nenhum.
+   Corrigido envolvendo a chamada em `asyncio.wait_for(..., timeout=_SEARCH_TIMEOUT)` -- mesma
+   degradação graciosa que já protege os outros protocolos.
+
+**Achado real na integração com a Raydium (companion de fee tier pra Solana)**: `RaydiumError`
+(rede/rate limit) era engolido e virava `fee_tier=0` -- mesma classe de bug do item 4 acima, só que
+num lugar diferente: `fee_tier=0` propaga pra `fee_rate=0` -> `fees_usd=0` em todo candle -> APR de
+taxa do pool inteiro mostrado como 0%, um zero fabricado com aparência de medição real (só notado
+ao testar `/pool/:id/simulate` de verdade pra uma pool de Solana, não só o detalhe do pool -- a
+página de faixa de preço é o único lugar que de fato usa esse APR calculado a partir do fee tier).
+Corrigido: `_resolve_fee_tier_geckoterminal` deixa `RaydiumError` propagar (não trata mais como
+"taxa desconhecida, assume 0") -- os chamadores (`_get_pool_detail_geckoterminal`,
+`_get_day_data_geckoterminal`) convertem pra `GraphQueryError`/502, igual já faziam pra
+`GeckoTerminalError`. `raydium_client.py` também ganhou uma tentativa extra com espera curta em
+caso de 429 (só chamado com 1 pool por vez neste app, não precisou de um limitador dedicado como o
+da GeckoTerminal). Verificado ao vivo: `/pool/solana:8aDaBQkTrS6HVMjyc6EZebgdiaXhLYGriDWKWWp1NpFF`
+(TSLAx/USDC) resolve `fee_tier=1000` via Raydium e `/simulate` mostra APR full-range de 14,00% e
+cenários de faixa com números não-zero.
+
+**Escopo deliberadamente reduzido (não é falta de tratamento, é decisão consciente)**:
+- **Sem busca por par de tokens/lista de símbolos** pra esses dois protocolos -- a busca da
+  GeckoTerminal é só texto livre (`/search/pools?query=`), sem filtro estruturado tipo `symbol_in`.
+  Se `token_a`/`token_b` vier preenchido, `search_pools` simplesmente pula esses dois protocolos.
+- **Índice local (`/assets`, `/pools`) fica sem `volume_1d/30d`, `vol_1d/tvl`, `apr_pool_30d`** (NULL,
+  mesmo padrão já usado pra v2, mas por um motivo diferente: buscar OHLCV pool a pool durante um
+  crawl de centenas de pools estouraria o rate limit). Essas métricas só aparecem quando o usuário
+  abre o detalhe de um pool específico (`get_pool_detail`), que busca isso sozinho.
+- **`fee_tier` no índice local fica 0** (aparece como "0,00%" na coluna "Taxa" de `/pools`, não como
+  "—") pra pools crawladas dessas duas chains -- a listagem em lote da GeckoTerminal
+  (`/networks/{chain}/pools`) não inclui `pool_fee_percentage` (só o detalhe de UM pool tem esse
+  campo), e buscar o detalhe de cada pool só pra isso durante o crawl teria o mesmo problema de rate
+  limit do item acima. O detalhe do pool individual sempre mostra a taxa real.
+- **Sem verificação on-chain de TVL pra Solana** -- não é EVM, `eth_call`/`balanceOf` não se aplica.
+  `tvl_verified_onchain` fica sempre `False` pra esse protocolo. Pra Robinhood Chain (EVM de
+  verdade, RPC pública `https://rpc.mainnet.chain.robinhood.com`, chain id 4663, configurável via
+  `ROBINHOOD_RPC_URL`) a verificação on-chain funciona normalmente, mesmo mecanismo de sempre.
+- **`fees_usd_lifetime`/`tx_count` sempre 0** pra essas duas chains -- a GeckoTerminal não tem um
+  campo de volume/transações acumulado desde a criação da pool (só janelas m5/h1/h6/h24), diferente
+  do subgraph da Uniswap. `fees_usd` POR DIA (usado pro APR de janela) é estimado como
+  `volume_usd * (fee_tier / 1_000_000)`, mesmo padrão já usado pra v2.
+- **`get_related_pools` devolve lista vazia** pra esses dois protocolos -- cada chain só tem um
+  protocolo (sem v2/v3/v4 pra cruzar), e "outras fee tiers do mesmo par" exigiria uma busca por par
+  que a GeckoTerminal não suporta (ver primeiro item).
+
+Frontend: `protocolLabel('robinhood')` = "Uniswap v3/v4" (não dá pra saber v3 vs v4 sem consultar
+`dex.id` por pool, e não muda a matemática); `protocolLabel('solana')` = "Raydium (CLMM)" --
+**nunca "Uniswap"**, é um DEX diferente. `explorerTokenUrl`: Robinhood Chain usa o Blockscout da
+própria chain (`robinhoodchain.blockscout.com`), Solana usa o Solscan (`solscan.io`) -- ambos com o
+mesmo padrão de URL `/token/<endereço>` dos outros exploradores já usados.
 
 ## Filtro de rede (chain) separado do filtro de protocolo
 
@@ -406,10 +520,14 @@ preenchido em `/pools`/`/assets`. Pra ativos, `volume_1d_usd`/`volume_30d_usd` s
 métricas das pools onde o ativo aparece que TÊM a métrica medida (todo protocolo v3-like contribui);
 um ativo fica com essas colunas NULL só se TODAS as suas pools forem v2.
 
-Se algum dos 6 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
+Se algum dos 8 protocolos falhar durante um refresh, os outros ainda são salvos (índice fica
 parcialmente atualizado, não é tudo-ou-nada) e o motivo fica em `protocol_errors` na resposta --
-`IndexRefreshBar` mostra um aviso quando isso acontece. Só se os 6 falharem é que o índice existente
-é preservado sem alteração (nunca sobrescreve com um índice vazio).
+`IndexRefreshBar` mostra um aviso quando isso acontece. Só se os 8 falharem é que o índice existente
+é preservado sem alteração (nunca sobrescreve com um índice vazio). `robinhood`/`solana` têm uma
+falha PARCIAL adicional que não aparece em `protocol_errors` -- se o rate limit da GeckoTerminal
+bater no meio da paginação, o crawl aceita as páginas já buscadas em vez de descartar tudo (ver
+seção "Robinhood Chain e Solana via GeckoTerminal/Raydium"), então o índice pode ficar
+incompleto pra essas duas sem nenhum aviso visível.
 
 **Achado real ao construir esse índice pela primeira vez**: ordenar por TVL descendente expôs dois
 padrões de dado corrompido/manipulado que a busca ao vivo (que também ordena por TVL) já estava

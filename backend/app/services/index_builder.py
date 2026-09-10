@@ -9,10 +9,13 @@ um limite esperado de ser atingido na prática.
 
 Não roda automaticamente: só quando o usuário clica em "Atualizar" (ver
 routers/local_index.py). Custo típico de um refresh completo: ~90-180
-consultas ao gateway (rodando os 6 protocolos em paralelo -- v2/v3/v4
+consultas ao gateway do Graph (rodando 6 protocolos em paralelo -- v2/v3/v4
 mainnet, Aerodrome Slipstream em Base, Uniswap v3 em Polygon e Avalanche) --
 ainda uma fração pequena da cota mensal de 100k, mas grande o bastante pra
-não valer a pena rodar a cada carregamento de página.
+não valer a pena rodar a cada carregamento de página. Mais dois protocolos
+(Robinhood Chain, Solana) vêm de uma API separada (GeckoTerminal, não o
+Graph -- ver `_crawl_geckoterminal` e CLAUDE.md), com paginação e orçamento
+de requisições próprios por causa do rate limit dela.
 
 `_PAGE_SIZE` é 500, não 1.000, para todos os protocolos v3-like (v3/v4/
 aerodrome/polygon/avalanche, que trazem `poolDayData` aninhado, ver
@@ -31,12 +34,21 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import graph_client, local_db, token_categories
+from .. import geckoterminal_client, graph_client, local_db, token_categories
 from ..graph_client import GraphQueryError
 from . import pools as pools_service
 
 _PAGE_SIZE = 500
 _MAX_PAGES = 60
+
+# Robinhood Chain e Solana vêm da GeckoTerminal, não do Graph (ver
+# pools_service._GECKOTERMINAL_PROTOCOLS e CLAUDE.md) -- paginação bem menor
+# que os outros protocolos: `/networks/{chain}/pools` devolve ~20 pools por
+# página (não 500) e tem rate limit de verdade (~25 req/min, ver
+# geckoterminal_client.py), então um teto de 10 páginas (~200 pools) já é
+# generoso pro tamanho atual dessas duas chains sem estourar o orçamento de
+# requisições nem alongar demais o refresh manual.
+_GECKO_MAX_PAGES = 10
 
 # `poolDayData` é um campo derivado (@derivedFrom) no schema do Pool -- vem
 # de graça na MESMA consulta (sem custo extra de query ao gateway), diferente
@@ -106,6 +118,92 @@ async def _crawl_v3v4_like(protocol: str, min_tvl_usd: float) -> list[dict[str, 
         if len(page) < _PAGE_SIZE:
             break
         last_id = page[-1]["id"]
+    return rows
+
+
+def _normalize_geckoterminal_row(
+    pool_raw: dict[str, Any], token_lookup: dict[str, dict], min_tvl_usd: float
+) -> dict[str, Any] | None:
+    """Normaliza uma pool da GeckoTerminal pro mesmo formato de dict usado
+    pelas linhas vindas do Graph (`token0`/`token1`/`feeTier`/
+    `totalValueLockedUSD`/`volumeUSD`/`createdAtTimestamp`) -- assim
+    `rebuild_index` processa todo mundo no mesmo laço, sem duplicar a lógica
+    de agregação de ativos/`_is_plausible_pool`. `None` quando a pool não
+    tem os dois tokens resolvidos ou fica abaixo do piso de TVL (filtro
+    aplicado aqui, já que a API de listagem da GeckoTerminal não tem um
+    `where` embutido como o GraphQL do Graph tem)."""
+    attrs = pool_raw["attributes"]
+    tvl = float(attrs.get("reserve_in_usd") or 0.0)
+    if tvl < min_tvl_usd:
+        return None
+    rel = pool_raw["relationships"]
+    quote_id = rel["quote_token"]["data"]["id"]
+    base_id = rel["base_token"]["data"]["id"]
+    if quote_id not in token_lookup or base_id not in token_lookup:
+        return None
+    quote_attrs = token_lookup[quote_id]
+    base_attrs = token_lookup[base_id]
+
+    def _token_dict(t: dict) -> dict:
+        return {"id": t["address"], "symbol": t["symbol"], "name": t.get("name") or t["symbol"], "decimals": t["decimals"]}
+
+    return {
+        "id": pool_raw["id"].split("_", 1)[1],
+        # Convenção invertida da GeckoTerminal (quote/base) -> token0/token1
+        # deste app -- mesmo mapeamento de
+        # pools_service._to_pool_summary_geckoterminal, ver CLAUDE.md.
+        "token0": _token_dict(quote_attrs),
+        "token1": _token_dict(base_attrs),
+        "feeTier": pools_service._gecko_fee_tier(attrs.get("pool_fee_percentage")),
+        "totalValueLockedUSD": tvl,
+        "volumeUSD": float(((attrs.get("volume_usd") or {}).get("h24")) or 0.0),
+        "createdAtTimestamp": pools_service._parse_gecko_timestamp(attrs.get("pool_created_at")),
+    }
+
+
+async def _crawl_geckoterminal(protocol: str, min_tvl_usd: float) -> list[dict[str, Any]]:
+    """Lista pools de Robinhood Chain/Solana via GeckoTerminal -- estado
+    atual (TVL/volume-24h), SEM OHLCV. Diferente dos outros protocolos, essas
+    pools ficam sem volume_1d/30d/APR no ÍNDICE local (NULL, mesmo padrão já
+    usado pra v2 -- ver `rebuild_index` abaixo) porque a GeckoTerminal não
+    tem um endpoint de "day data em lote pra N pools": buscar OHLCV pool a
+    pool durante o crawl estouraria o rate limit da API (~25 req/min) pra
+    qualquer quantidade razoável de pools. O detalhe de um pool específico
+    (`pools_service._get_pool_detail_geckoterminal`) já busca isso sozinho.
+
+    Diferente do cursor estável (`id_gt`) usado pelos outros protocolos, a
+    paginação aqui é por número de página contra um ranking que muda em
+    tempo real (volume/TVL) -- achado real em 2026-09-10: a mesma pool
+    apareceu em duas páginas diferentes entre uma chamada e outra (a
+    ordenação mudou entre as requisições, ~4s de espaçamento cada), causando
+    `UNIQUE constraint failed: pools.id` no `replace_index`. Por isso
+    dedupa por id explicitamente, igual `_search_v3v4`/`_search_v2` já fazem.
+    """
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    page = 1
+    while page <= _GECKO_MAX_PAGES:
+        try:
+            raw_pools, token_lookup = await geckoterminal_client.list_pools(protocol, page)
+        except geckoterminal_client.GeckoTerminalError:
+            # Achado real: mesmo com o rate limiter, uma rajada de várias
+            # páginas pode tomar 429 no meio do caminho -- preferível manter
+            # as páginas já buscadas (índice parcial) a descartar tudo por
+            # causa da última falhar. Mesmo espírito de "atualização parcial
+            # não é tudo-ou-nada" que já existe pros outros protocolos.
+            break
+        if not raw_pools:
+            break
+        for pool_raw in raw_pools:
+            if pool_raw["id"] in seen_ids:
+                continue
+            seen_ids.add(pool_raw["id"])
+            row = _normalize_geckoterminal_row(pool_raw, token_lookup, min_tvl_usd)
+            if row is not None:
+                rows.append(row)
+        if len(raw_pools) < 20:
+            break
+        page += 1
     return rows
 
 
@@ -219,7 +317,7 @@ async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
     registrada em `protocol_errors` pra UI avisar que aquele protocolo pode
     estar desatualizado até a próxima tentativa.
     """
-    protocols = ["v2", "v3", "v4", "aerodrome", "polygon", "avalanche"]
+    protocols = ["v2", "v3", "v4", "aerodrome", "polygon", "avalanche", "robinhood", "solana"]
     raw_results = await asyncio.gather(
         _crawl_v2(min_tvl_usd),
         _crawl_v3v4_like("v3", min_tvl_usd),
@@ -227,6 +325,8 @@ async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
         _crawl_v3v4_like("aerodrome", min_tvl_usd),
         _crawl_v3v4_like("polygon", min_tvl_usd),
         _crawl_v3v4_like("avalanche", min_tvl_usd),
+        _crawl_geckoterminal("robinhood", min_tvl_usd),
+        _crawl_geckoterminal("solana", min_tvl_usd),
         return_exceptions=True,
     )
 
@@ -252,10 +352,12 @@ async def rebuild_index(min_tvl_usd: float = 1000.0) -> local_db.IndexMeta:
             if not pools_service._is_plausible_pool(tvl, fee_tier, volume):
                 continue
             # v2 não tem `poolDayData` na resposta (nem existe no schema, ver
-            # comentário em _INDEX_POOLS_QUERY) -- day_stats fica None, e as
-            # métricas por janela ficam NULL no índice pra esse pool/ativo.
+            # comentário em _INDEX_POOLS_QUERY); robinhood/solana não têm
+            # OHLCV buscado durante o crawl (ver _crawl_geckoterminal) -- nos
+            # dois casos day_stats fica None, e as métricas por janela ficam
+            # NULL no índice pra esse pool/ativo (não 0 -- ver local_db.py).
             day_stats = None
-            if protocol != "v2":
+            if protocol != "v2" and protocol not in pools_service._GECKOTERMINAL_PROTOCOLS:
                 day_rows = [
                     (int(d["date"]), float(d["volumeUSD"]), float(d["feesUSD"]))
                     for d in row.get("poolDayData", [])

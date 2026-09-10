@@ -17,11 +17,11 @@ from ..services import index_builder
 
 router = APIRouter(prefix="/api/index", tags=["index"])
 
-_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome", "polygon", "avalanche"}
+_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome", "polygon", "avalanche", "robinhood", "solana"}
 # Chain é um filtro separado de protocol -- útil sobretudo pra /assets, que
 # não tem noção de "protocolo" (um ativo não pertence a uma versão da
 # Uniswap, só a uma chain). Mesmos valores de services/pools.py::_PROTOCOL_CHAIN.
-_VALID_CHAINS = {"mainnet", "base", "polygon", "avalanche"}
+_VALID_CHAINS = {"mainnet", "base", "polygon", "avalanche", "robinhood", "solana"}
 
 
 def _asset_to_row(a: local_db.AssetRecord) -> AssetIndexRow:

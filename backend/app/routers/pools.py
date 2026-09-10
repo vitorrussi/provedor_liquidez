@@ -7,7 +7,7 @@ from ..services import pools as pools_service
 
 router = APIRouter(prefix="/api/pools", tags=["pools"])
 
-_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome", "polygon", "avalanche"}
+_VALID_PROTOCOLS = {"v2", "v3", "v4", "aerodrome", "polygon", "avalanche", "robinhood", "solana"}
 
 
 @router.get("/search", response_model=list[PoolSummary])
